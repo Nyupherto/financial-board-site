@@ -1,0 +1,32 @@
+# Caddy Reverse Proxy Configuration for Family Financial Dashboard
+# Supports Local LAN, Internal Self-Signed TLS, or Automatic Let's Encrypt with DuckDNS / Custom Domain
+
+{
+    # In production with DuckDNS or custom domain, comment out or configure your email:
+    # email family-admin@yourdomain.com
+}
+
+# Default configuration: binds to HTTP and HTTPS on all interfaces (LAN / Localhost)
+# If using DuckDNS or custom domain, replace ":80, :443" with "your-subdomain.duckdns.org"
+:80, :443 {
+    # If accessed locally via HTTPS without a public domain, Caddy generates an internal self-signed TLS cert
+    tls internal
+
+    # Route backend REST API
+    handle /api/* {
+        reverse_proxy backend:5000
+    }
+
+    # Route frontend client application
+    handle /* {
+        reverse_proxy frontend:80
+    }
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}

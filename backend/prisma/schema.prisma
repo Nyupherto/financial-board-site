@@ -1,0 +1,133 @@
+// Prisma Relational Schema for Personal & Family Financial Management Dashboard
+// Uses SQLite for zero-config persistence with strict integer-cents currency fields.
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String   @default("MEMBER") // "ADMIN" | "MEMBER"
+  avatarColor  String   @default("#3b82f6") // Hex color for user badge
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  transactions      Transaction[]
+  savingsGoals      SavingsGoal[]
+  allocationBuckets AllocationBucket[]
+  monthlyRecords    MonthlyRecord[]
+
+  @@map("users")
+}
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String
+  type      String   // "INCOME" | "EXPENSE"
+  icon      String   @default("tag")
+  color     String   @default("#64748b")
+  isDefault Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  transactions Transaction[]
+
+  @@unique([name, type])
+  @@map("categories")
+}
+
+model MonthlyRecord {
+  id                String   @id @default(uuid())
+  year              Int
+  month             Int      // 1 to 12
+  userId            String?  // null indicates consolidated family record; or individual user profile
+  totalIncomeCents  Int      @default(0)
+  totalPaidCents    Int      @default(0)
+  totalPendingCents Int      @default(0)
+  netCashFlowCents  Int      @default(0)
+  isClosed          Boolean  @default(false)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user         User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  transactions Transaction[]
+  allocations  AllocationBucket[]
+
+  @@unique([year, month, userId])
+  @@index([year, month])
+  @@map("monthly_records")
+}
+
+model Transaction {
+  id              String    @id @default(uuid())
+  monthlyRecordId String?
+  userId          String
+  categoryId      String
+  description     String
+  amountCents     Int       // Always stored in integer cents (e.g., $150.00 -> 15000)
+  type            String    // "INCOME" | "EXPENSE"
+  status          String    @default("PENDING") // "PAID" | "PENDING"
+  dueDate         DateTime
+  paidAt          DateTime?
+  isShared        Boolean   @default(true) // Whether shared in family overview
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  monthlyRecord MonthlyRecord? @relation(fields: [monthlyRecordId], references: [id], onDelete: Cascade)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category      Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@index([monthlyRecordId])
+  @@index([userId])
+  @@index([dueDate])
+  @@index([status])
+  @@map("transactions")
+}
+
+model AllocationBucket {
+  id                   String   @id @default(uuid())
+  monthlyRecordId      String
+  userId               String?
+  bucketName           String   // e.g. "Emergency Fund", "Long-Term Investments", "Leisure"
+  targetPercentage     Float?   // Target % (e.g. 50.0 for 50%)
+  allocatedAmountCents Int      @default(0) // Integer cents assigned
+  notes                String?
+  createdAt            DateTime @default(now())
+
+  monthlyRecord MonthlyRecord @relation(fields: [monthlyRecordId], references: [id], onDelete: Cascade)
+  user          User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([monthlyRecordId])
+  @@map("allocation_buckets")
+}
+
+model SavingsGoal {
+  id                       String   @id @default(uuid())
+  userId                   String
+  name                     String   // e.g., "Emergency Fund (6 Months)", "Retirement Nest Egg"
+  targetAmountCents        Int      // Target savings amount in cents
+  initialPrincipalCents    Int      // Starting principal P in cents
+  monthlyContributionCents Int      // Monthly PMT in cents
+  annualInterestRateBps    Int      // Annual interest rate in Basis Points (e.g. 850 = 8.50%)
+  horizonMonths            Int      // Duration n in months
+  currentBalanceCents      Int      @default(0)
+  contributionTiming       String   @default("END_OF_PERIOD") // "END_OF_PERIOD" | "BEGINNING_OF_PERIOD"
+  isCompleted              Boolean  @default(false)
+  notes                    String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("savings_goals")
+}
