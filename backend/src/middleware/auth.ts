@@ -1,7 +1,23 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import dotenv from 'dotenv';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'financial-board-jwt-secret-key-super-secure-production-2026';
+dotenv.config();
+
+function getJwtSecret(): string {
+  const envSecret = process.env.JWT_SECRET;
+  if (envSecret && envSecret.trim().length >= 32) {
+    return envSecret.trim();
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('FATAL: JWT_SECRET environment variable must be set and at least 32 characters long in production.');
+  }
+  // Ephemeral cryptographically random secret per process boot when no .env secret is configured in development
+  return crypto.randomBytes(64).toString('hex');
+}
+
+const JWT_SECRET = getJwtSecret();
 
 export interface AuthUser {
   id: string;
@@ -22,30 +38,40 @@ export function generateToken(user: AuthUser): string {
   return jwt.sign(
     { id: user.id, email: user.email, name: user.name, role: user.role },
     JWT_SECRET,
-    { expiresIn: '30d' }
+    {
+      algorithm: 'HS256',
+      expiresIn: '12h',
+    }
   );
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Authentication required. Please provide a Bearer token.' });
+    res.status(401).json({ error: 'Autenticação necessária.' });
     return;
   }
 
   const token = authHeader.split(' ')[1];
+  if (!token || token.length > 2048) {
+    res.status(401).json({ error: 'Token inválido.' });
+    return;
+  }
+
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as AuthUser;
+    const decoded = jwt.verify(token, JWT_SECRET, {
+      algorithms: ['HS256'],
+    }) as AuthUser;
     req.user = decoded;
     next();
-  } catch (err) {
-    res.status(401).json({ error: 'Invalid or expired session token.' });
+  } catch {
+    res.status(401).json({ error: 'Sessão inválida ou expirada.' });
   }
 }
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   if (!req.user || req.user.role !== 'ADMIN') {
-    res.status(403).json({ error: 'Forbidden. Admin privileges required.' });
+    res.status(403).json({ error: 'Acesso negado. Privilégios de administrador necessários.' });
     return;
   }
   next();

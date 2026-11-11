@@ -13,15 +13,40 @@ const DEFAULT_BUCKET_RULES: AllocationBucketRule[] = [
   { id: 'bucket-leisure', name: 'Lazer & Qualidade de Vida', targetPercentage: 20 },
 ];
 
+function buildUserScopeFilter(reqUser: { id: string; role: string }, requestedUserId?: string) {
+  const isFamilyView = !requestedUserId || requestedUserId === 'all';
+  const isAdmin = reqUser.role === 'ADMIN';
+
+  if (isFamilyView) {
+    if (isAdmin) return {};
+    return {
+      OR: [{ userId: reqUser.id }, { isShared: true }],
+    };
+  }
+
+  if (isAdmin || requestedUserId === reqUser.id) {
+    return { userId: requestedUserId };
+  }
+
+  return {
+    userId: requestedUserId,
+    isShared: true,
+  };
+}
+
 // Get monthly dashboard summary & real-time balance
 router.get('/summary', requireAuth, async (req: Request, res: Response) => {
   try {
     const currentDate = new Date();
-    const year = req.query.year ? parseInt(req.query.year as string, 10) : currentDate.getFullYear();
-    const month = req.query.month ? parseInt(req.query.month as string, 10) : currentDate.getMonth() + 1;
-    const requestedUserId = req.query.userId as string | undefined;
+    const rawYear = req.query.year ? parseInt(req.query.year as string, 10) : currentDate.getFullYear();
+    const rawMonth = req.query.month ? parseInt(req.query.month as string, 10) : currentDate.getMonth() + 1;
+
+    const year = Number.isFinite(rawYear) && rawYear >= 1970 && rawYear <= 2100 ? rawYear : currentDate.getFullYear();
+    const month = Number.isFinite(rawMonth) && rawMonth >= 1 && rawMonth <= 12 ? rawMonth : currentDate.getMonth() + 1;
+    const requestedUserId = typeof req.query.userId === 'string' ? req.query.userId : undefined;
 
     const isFamilyView = !requestedUserId || requestedUserId === 'all';
+    const userScope = buildUserScopeFilter(req.user!, requestedUserId);
 
     const startDate = new Date(Date.UTC(year, month - 1, 1));
     const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
@@ -31,11 +56,8 @@ router.get('/summary', requireAuth, async (req: Request, res: Response) => {
         gte: startDate,
         lte: endDate,
       },
+      ...userScope,
     };
-
-    if (!isFamilyView) {
-      whereClause.userId = requestedUserId;
-    }
 
     const rawTransactions = await prisma.transaction.findMany({
       where: whereClause,
@@ -123,7 +145,7 @@ router.get('/summary', requireAuth, async (req: Request, res: Response) => {
     const prevTransactions = await prisma.transaction.findMany({
       where: {
         dueDate: { gte: prevStartDate, lte: prevEndDate },
-        ...(!isFamilyView ? { userId: requestedUserId } : {}),
+        ...userScope,
       },
     });
 
@@ -168,19 +190,19 @@ router.get('/summary', requireAuth, async (req: Request, res: Response) => {
         netCashFlowGrowthPercent: momDelta.netCashFlowGrowthPercent,
       },
     });
-  } catch (error: any) {
-    res.status(500).json({ error: 'Failed to compute dashboard summary', details: error.message });
+  } catch {
+    res.status(500).json({ error: 'Failed to compute dashboard summary' });
   }
 });
 
 // Get 12-month historical cash flow trend computed directly from real transactions
 router.get('/history', requireAuth, async (req: Request, res: Response) => {
   try {
-    const requestedUserId = req.query.userId as string | undefined;
-    const isFamilyView = !requestedUserId || requestedUserId === 'all';
+    const requestedUserId = typeof req.query.userId === 'string' ? req.query.userId : undefined;
+    const userScope = buildUserScopeFilter(req.user!, requestedUserId);
 
     const totalTxCount = await prisma.transaction.count({
-      where: !isFamilyView ? { userId: requestedUserId } : {},
+      where: userScope,
     });
 
     if (totalTxCount === 0) {
@@ -189,8 +211,10 @@ router.get('/history', requireAuth, async (req: Request, res: Response) => {
     }
 
     const now = new Date();
-    const currentYear = req.query.year ? parseInt(req.query.year as string, 10) : now.getFullYear();
-    const currentMonth = req.query.month ? parseInt(req.query.month as string, 10) : now.getMonth() + 1;
+    const rawYear = req.query.year ? parseInt(req.query.year as string, 10) : now.getFullYear();
+    const rawMonth = req.query.month ? parseInt(req.query.month as string, 10) : now.getMonth() + 1;
+    const currentYear = Number.isFinite(rawYear) && rawYear >= 1970 && rawYear <= 2100 ? rawYear : now.getFullYear();
+    const currentMonth = Number.isFinite(rawMonth) && rawMonth >= 1 && rawMonth <= 12 ? rawMonth : now.getMonth() + 1;
     const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
     const historyList = [];
@@ -208,7 +232,7 @@ router.get('/history', requireAuth, async (req: Request, res: Response) => {
       const monthTxs = await prisma.transaction.findMany({
         where: {
           dueDate: { gte: startDate, lte: endDate },
-          ...(!isFamilyView ? { userId: requestedUserId } : {}),
+          ...userScope,
         },
       });
 
@@ -236,8 +260,8 @@ router.get('/history', requireAuth, async (req: Request, res: Response) => {
     }
 
     res.json(historyList);
-  } catch (error: any) {
-    res.status(500).json({ error: 'Failed to fetch cash flow history', details: error.message });
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch cash flow history' });
   }
 });
 

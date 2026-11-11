@@ -10,6 +10,8 @@ const GROUP_COLORS = [
   '#ef4444', '#84cc16', '#a855f7', '#f97316', '#eab308', '#10b981', '#06b6d4', '#3b82f6', '#ec4899'
 ];
 
+const MAX_AMOUNT_DOLLARS = 100_000_000; // $100M max safe bound for 32-bit int cents
+
 // List categories / groups
 router.get('/categories', requireAuth, async (_req: Request, res: Response) => {
   try {
@@ -17,8 +19,9 @@ router.get('/categories', requireAuth, async (_req: Request, res: Response) => {
       orderBy: [{ type: 'asc' }, { name: 'asc' }],
     });
     res.json(categories);
-  } catch (error: any) {
-    res.status(500).json({ error: 'Failed to fetch categories' });
+  } catch (error) {
+    console.error('Error fetching categories:', error);
+    res.status(500).json({ error: 'Falha ao buscar grupos.' });
   }
 });
 
@@ -26,8 +29,8 @@ router.get('/categories', requireAuth, async (_req: Request, res: Response) => {
 router.post('/categories', requireAuth, async (req: Request, res: Response) => {
   try {
     const { name, type = 'EXPENSE', color } = req.body;
-    if (!name || !name.trim()) {
-      res.status(400).json({ error: 'O nome do grupo é obrigatório.' });
+    if (typeof name !== 'string' || !name.trim() || name.trim().length > 60) {
+      res.status(400).json({ error: 'Nome de grupo inválido (máx. 60 caracteres).' });
       return;
     }
 
@@ -42,7 +45,13 @@ router.post('/categories', requireAuth, async (req: Request, res: Response) => {
     }
 
     const count = await prisma.category.count();
-    const assignedColor = color || GROUP_COLORS[count % GROUP_COLORS.length];
+    if (count >= 50) {
+      res.status(400).json({ error: 'Limite máximo de grupos atingido.' });
+      return;
+    }
+
+    const isValidHex = typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color);
+    const assignedColor = isValidHex ? color : GROUP_COLORS[count % GROUP_COLORS.length];
 
     const created = await prisma.category.create({
       data: {
@@ -55,36 +64,49 @@ router.post('/categories', requireAuth, async (req: Request, res: Response) => {
     });
 
     res.status(201).json(created);
-  } catch (error: any) {
-    res.status(500).json({ error: 'Falha ao criar grupo.', details: error.message });
+  } catch (error) {
+    console.error('Error creating category:', error);
+    res.status(500).json({ error: 'Falha ao criar grupo.' });
   }
 });
 
-// List transactions with filtering
+// List transactions with filtering and authorization checks
 router.get('/transactions', requireAuth, async (req: Request, res: Response) => {
   try {
     const { year, month, userId, status, type } = req.query;
+    const isAdmin = req.user?.role === 'ADMIN';
 
     const where: any = {};
 
     if (year && month) {
       const y = parseInt(year as string, 10);
       const m = parseInt(month as string, 10);
-      const startDate = new Date(Date.UTC(y, m - 1, 1));
-      const endDate = new Date(Date.UTC(y, m, 0, 23, 59, 59, 999));
-      where.dueDate = { gte: startDate, lte: endDate };
+      if (Number.isInteger(y) && Number.isInteger(m) && m >= 1 && m <= 12) {
+        const startDate = new Date(Date.UTC(y, m - 1, 1));
+        const endDate = new Date(Date.UTC(y, m, 0, 23, 59, 59, 999));
+        where.dueDate = { gte: startDate, lte: endDate };
+      }
     }
 
     if (userId && userId !== 'all') {
-      where.userId = userId as string;
+      if (!isAdmin && userId !== req.user!.id) {
+        // Non-admin viewing another member can only see shared transactions
+        where.userId = userId as string;
+        where.isShared = true;
+      } else {
+        where.userId = userId as string;
+      }
+    } else if (!isAdmin) {
+      // Non-admin in family overview sees own transactions + shared transactions
+      where.OR = [{ userId: req.user!.id }, { isShared: true }];
     }
 
-    if (status && status !== 'ALL') {
-      where.status = status as string;
+    if (status === 'PAID' || status === 'PENDING') {
+      where.status = status;
     }
 
-    if (type && type !== 'ALL') {
-      where.type = type as string;
+    if (type === 'INCOME' || type === 'EXPENSE') {
+      where.type = type;
     }
 
     const transactions = await prisma.transaction.findMany({
@@ -102,19 +124,26 @@ router.get('/transactions', requireAuth, async (req: Request, res: Response) => 
     }));
 
     res.json(formatted);
-  } catch (error: any) {
-    res.status(500).json({ error: 'Failed to list transactions', details: error.message });
+  } catch (error) {
+    console.error('Error listing transactions:', error);
+    res.status(500).json({ error: 'Falha ao listar lançamentos.' });
   }
 });
 
 // Helper to resolve or create a category by ID or Name
-async function resolveCategoryId(categoryId?: string, categoryName?: string, type: 'INCOME' | 'EXPENSE' = 'EXPENSE'): Promise<string> {
-  if (categoryId) {
+async function resolveCategoryId(
+  categoryId?: string,
+  categoryName?: string,
+  type: 'INCOME' | 'EXPENSE' = 'EXPENSE'
+): Promise<string> {
+  if (categoryId && typeof categoryId === 'string') {
     const found = await prisma.category.findUnique({ where: { id: categoryId } });
     if (found) return found.id;
   }
 
-  const targetName = (categoryName || (type === 'INCOME' ? 'Renda & Ganhos' : 'Despesas')).trim();
+  const rawName = typeof categoryName === 'string' ? categoryName.trim().slice(0, 60) : '';
+  const targetName = rawName || (type === 'INCOME' ? 'Renda & Ganhos' : 'Despesas');
+
   const existing = await prisma.category.findFirst({
     where: { name: targetName },
   });
@@ -149,15 +178,21 @@ router.post('/transactions', requireAuth, async (req: Request, res: Response) =>
       notes,
     } = req.body;
 
-    if (!description || amountDollars === undefined) {
-      res.status(400).json({ error: 'Descrição e valor são obrigatórios.' });
+    if (typeof description !== 'string' || !description.trim() || description.trim().length > 200) {
+      res.status(400).json({ error: 'Descrição inválida (máx. 200 caracteres).' });
+      return;
+    }
+
+    const numAmount = Math.abs(Number(amountDollars));
+    if (!Number.isFinite(numAmount) || numAmount <= 0 || numAmount > MAX_AMOUNT_DOLLARS) {
+      res.status(400).json({ error: 'Valor monetário fora dos limites permitidos.' });
       return;
     }
 
     const txType: 'INCOME' | 'EXPENSE' = type === 'INCOME' ? 'INCOME' : 'EXPENSE';
     const resolvedCategoryId = await resolveCategoryId(categoryId, categoryName, txType);
-    const targetUserId = req.user?.role === 'ADMIN' && userId ? userId : req.user!.id;
-    const amountCents = dollarsToCents(Math.abs(Number(amountDollars)));
+    const targetUserId = req.user?.role === 'ADMIN' && typeof userId === 'string' && userId ? userId : req.user!.id;
+    const amountCents = dollarsToCents(numAmount);
     const targetDueDate = dueDate ? new Date(dueDate) : new Date();
 
     const newTx = await prisma.transaction.create({
@@ -167,11 +202,11 @@ router.post('/transactions', requireAuth, async (req: Request, res: Response) =>
         description: description.trim(),
         amountCents,
         type: txType,
-        status: status as 'PAID' | 'PENDING',
-        dueDate: targetDueDate,
-        paidAt: status === 'PAID' ? new Date() : null,
+        status: status === 'PENDING' ? 'PENDING' : 'PAID',
+        dueDate: Number.isNaN(targetDueDate.getTime()) ? new Date() : targetDueDate,
+        paidAt: status === 'PENDING' ? null : new Date(),
         isShared: Boolean(isShared),
-        notes: notes || null,
+        notes: typeof notes === 'string' ? notes.slice(0, 500) : null,
       },
       include: {
         category: true,
@@ -183,8 +218,9 @@ router.post('/transactions', requireAuth, async (req: Request, res: Response) =>
       ...newTx,
       amountDollars: centsToDollars(newTx.amountCents),
     });
-  } catch (error: any) {
-    res.status(500).json({ error: 'Failed to create transaction', details: error.message });
+  } catch (error) {
+    console.error('Error creating transaction:', error);
+    res.status(500).json({ error: 'Falha ao criar lançamento.' });
   }
 });
 
@@ -192,27 +228,35 @@ router.post('/transactions', requireAuth, async (req: Request, res: Response) =>
 router.post('/transactions/batch', requireAuth, async (req: Request, res: Response) => {
   try {
     const { items, dueDate, userId } = req.body;
-    if (!Array.isArray(items) || items.length === 0) {
-      res.status(400).json({ error: 'Nenhum item válido para lançamento.' });
+    if (!Array.isArray(items) || items.length === 0 || items.length > 100) {
+      res.status(400).json({ error: 'Lista de itens inválida (máximo de 100 itens por lote).' });
       return;
     }
 
-    const targetUserId = req.user?.role === 'ADMIN' && userId ? userId : req.user!.id;
-    const targetDueDate = dueDate ? new Date(dueDate) : new Date();
+    const targetUserId = req.user?.role === 'ADMIN' && typeof userId === 'string' && userId ? userId : req.user!.id;
+    const parsedDate = dueDate ? new Date(dueDate) : new Date();
+    const targetDueDate = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
 
     const createdItems = [];
     for (const item of items) {
+      if (!item || typeof item.description !== 'string') continue;
+      const cleanDesc = item.description.trim().slice(0, 200);
+      const numAmount = Math.abs(Number(item.amount));
+      if (!cleanDesc || !Number.isFinite(numAmount) || numAmount <= 0 || numAmount > MAX_AMOUNT_DOLLARS) {
+        continue;
+      }
+
       const txType: 'INCOME' | 'EXPENSE' = item.type === 'INCOME' ? 'INCOME' : 'EXPENSE';
       const resolvedCategoryId = await resolveCategoryId(item.categoryId, item.groupName, txType);
-      const amountCents = dollarsToCents(Math.abs(Number(item.amount)));
+      const amountCents = dollarsToCents(numAmount);
 
-      if (!item.description || amountCents <= 0) continue;
+      if (amountCents <= 0) continue;
 
       const created = await prisma.transaction.create({
         data: {
           userId: targetUserId,
           categoryId: resolvedCategoryId,
-          description: item.description.trim(),
+          description: cleanDesc,
           amountCents,
           type: txType,
           status: item.status === 'PENDING' ? 'PENDING' : 'PAID',
@@ -233,18 +277,24 @@ router.post('/transactions/batch', requireAuth, async (req: Request, res: Respon
     }
 
     res.status(201).json(createdItems);
-  } catch (error: any) {
-    res.status(500).json({ error: 'Falha ao salvar lançamentos em lote.', details: error.message });
+  } catch (error) {
+    console.error('Error creating batch transactions:', error);
+    res.status(500).json({ error: 'Falha ao salvar lançamentos em lote.' });
   }
 });
 
-// Quick toggle payment status (PAID <-> PENDING)
+// Quick toggle payment status (PAID <-> PENDING) with Ownership / Role Verification
 router.patch('/transactions/:id/status', requireAuth, async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const existing = await prisma.transaction.findUnique({ where: { id } });
     if (!existing) {
-      res.status(404).json({ error: 'Transaction not found' });
+      res.status(404).json({ error: 'Lançamento não encontrado.' });
+      return;
+    }
+
+    if (req.user!.role !== 'ADMIN' && existing.userId !== req.user!.id) {
+      res.status(403).json({ error: 'Sem permissão para alterar este lançamento.' });
       return;
     }
 
@@ -265,15 +315,27 @@ router.patch('/transactions/:id/status', requireAuth, async (req: Request, res: 
       ...updated,
       amountDollars: centsToDollars(updated.amountCents),
     });
-  } catch (error: any) {
-    res.status(500).json({ error: 'Failed to update transaction status', details: error.message });
+  } catch (error) {
+    console.error('Error toggling transaction status:', error);
+    res.status(500).json({ error: 'Falha ao atualizar status.' });
   }
 });
 
-// Update transaction (Group reallocation, value increase/decrease, type change, description)
+// Update transaction with Ownership / Role Verification
 router.put('/transactions/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
+    const existing = await prisma.transaction.findUnique({ where: { id } });
+    if (!existing) {
+      res.status(404).json({ error: 'Lançamento não encontrado.' });
+      return;
+    }
+
+    if (req.user!.role !== 'ADMIN' && existing.userId !== req.user!.id) {
+      res.status(403).json({ error: 'Sem permissão para editar este lançamento.' });
+      return;
+    }
+
     const {
       description,
       amountDollars,
@@ -287,23 +349,29 @@ router.put('/transactions/:id', requireAuth, async (req: Request, res: Response)
     } = req.body;
 
     const dataToUpdate: any = {};
-    if (description !== undefined) dataToUpdate.description = description.trim();
-    if (amountDollars !== undefined) {
-      dataToUpdate.amountCents = dollarsToCents(Math.max(0, Math.abs(Number(amountDollars))));
+    if (typeof description === 'string' && description.trim()) {
+      dataToUpdate.description = description.trim().slice(0, 200);
     }
-    if (type !== undefined) {
-      dataToUpdate.type = type === 'INCOME' ? 'INCOME' : 'EXPENSE';
+    if (amountDollars !== undefined) {
+      const numAmount = Math.abs(Number(amountDollars));
+      if (!Number.isFinite(numAmount) || numAmount <= 0 || numAmount > MAX_AMOUNT_DOLLARS) {
+        res.status(400).json({ error: 'Valor inválido.' });
+        return;
+      }
+      dataToUpdate.amountCents = dollarsToCents(numAmount);
+    }
+    if (type === 'INCOME' || type === 'EXPENSE') {
+      dataToUpdate.type = type;
     }
 
     if (categoryId !== undefined || categoryName !== undefined) {
       const resolvedCatId = await resolveCategoryId(
         categoryId,
         categoryName,
-        dataToUpdate.type || 'EXPENSE'
+        dataToUpdate.type || existing.type
       );
       dataToUpdate.categoryId = resolvedCatId;
 
-      // If category has a specific type (e.g. Ganhos com a Oficina is INCOME) and type wasn't explicitly overridden, sync it
       if (type === undefined) {
         const cat = await prisma.category.findUnique({ where: { id: resolvedCatId } });
         if (cat) {
@@ -312,13 +380,18 @@ router.put('/transactions/:id', requireAuth, async (req: Request, res: Response)
       }
     }
 
-    if (status !== undefined) {
+    if (status === 'PAID' || status === 'PENDING') {
       dataToUpdate.status = status;
       dataToUpdate.paidAt = status === 'PAID' ? new Date() : null;
     }
-    if (dueDate !== undefined) dataToUpdate.dueDate = new Date(dueDate);
+    if (dueDate !== undefined) {
+      const parsedDate = new Date(dueDate);
+      if (!Number.isNaN(parsedDate.getTime())) {
+        dataToUpdate.dueDate = parsedDate;
+      }
+    }
     if (isShared !== undefined) dataToUpdate.isShared = Boolean(isShared);
-    if (notes !== undefined) dataToUpdate.notes = notes;
+    if (typeof notes === 'string') dataToUpdate.notes = notes.slice(0, 500);
 
     const updated = await prisma.transaction.update({
       where: { id },
@@ -333,19 +406,32 @@ router.put('/transactions/:id', requireAuth, async (req: Request, res: Response)
       ...updated,
       amountDollars: centsToDollars(updated.amountCents),
     });
-  } catch (error: any) {
-    res.status(500).json({ error: 'Failed to update transaction', details: error.message });
+  } catch (error) {
+    console.error('Error updating transaction:', error);
+    res.status(500).json({ error: 'Falha ao atualizar lançamento.' });
   }
 });
 
-// Delete transaction
+// Delete transaction with Ownership / Role Verification
 router.delete('/transactions/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
+    const existing = await prisma.transaction.findUnique({ where: { id } });
+    if (!existing) {
+      res.status(404).json({ error: 'Lançamento não encontrado.' });
+      return;
+    }
+
+    if (req.user!.role !== 'ADMIN' && existing.userId !== req.user!.id) {
+      res.status(403).json({ error: 'Sem permissão para excluir este lançamento.' });
+      return;
+    }
+
     await prisma.transaction.delete({ where: { id } });
-    res.json({ success: true, message: 'Transaction deleted successfully' });
-  } catch (error: any) {
-    res.status(500).json({ error: 'Failed to delete transaction' });
+    res.json({ success: true, message: 'Lançamento excluído com sucesso.' });
+  } catch (error) {
+    console.error('Error deleting transaction:', error);
+    res.status(500).json({ error: 'Falha ao excluir lançamento.' });
   }
 });
 

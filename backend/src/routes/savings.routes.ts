@@ -7,10 +7,16 @@ import { dollarsToCents, centsToDollars } from '../math/currency.js';
 const router = Router();
 const prisma = new PrismaClient();
 
+const MAX_SIM_PRINCIPAL = 100_000_000;
+const MAX_SIM_CONTRIBUTION = 10_000_000;
+
 // List savings goals with calculated projections
 router.get('/savings', requireAuth, async (req: Request, res: Response) => {
   try {
+    const whereClause = req.user!.role === 'ADMIN' ? {} : { userId: req.user!.id };
+
     const goals = await prisma.savingsGoal.findMany({
+      where: whereClause,
       include: {
         user: { select: { id: true, name: true, avatarColor: true } },
       },
@@ -54,36 +60,39 @@ router.get('/savings', requireAuth, async (req: Request, res: Response) => {
     });
 
     res.json(enrichedGoals);
-  } catch (error: any) {
-    res.status(500).json({ error: 'Failed to fetch savings goals', details: error.message });
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch savings goals' });
   }
 });
 
-// Run 100% Offline Compound Interest Simulation (on-the-fly)
-router.post('/savings/simulate', async (req: Request, res: Response) => {
+// Run 100% Offline Compound Interest Simulation (on-the-fly, authenticated)
+router.post('/savings/simulate', requireAuth, async (req: Request, res: Response) => {
   try {
     const {
-      initialPrincipalDollars = 10000,
-      monthlyContributionDollars = 500,
+      initialPrincipalDollars = 0,
+      monthlyContributionDollars = 0,
       annualInterestRatePercent = 10,
       horizonMonths = 60,
       contributionTiming = 'END_OF_PERIOD',
     } = req.body;
 
-    const initialPrincipalCents = dollarsToCents(Number(initialPrincipalDollars));
-    const monthlyContributionCents = dollarsToCents(Number(monthlyContributionDollars));
-    const annualRate = Number(annualInterestRatePercent);
-    const months = Math.max(1, Math.min(600, parseInt(horizonMonths, 10))); // clamp up to 50 years
+    const rawPrincipal = Math.max(0, Math.min(MAX_SIM_PRINCIPAL, Number(initialPrincipalDollars) || 0));
+    const rawMonthly = Math.max(0, Math.min(MAX_SIM_CONTRIBUTION, Number(monthlyContributionDollars) || 0));
+    const annualRate = Math.max(0, Math.min(100, Number(annualInterestRatePercent) || 0));
+    const months = Math.max(1, Math.min(600, parseInt(String(horizonMonths), 10) || 60));
+    const safeTiming = contributionTiming === 'BEGINNING_OF_PERIOD' ? 'BEGINNING_OF_PERIOD' : 'END_OF_PERIOD';
+
+    const initialPrincipalCents = dollarsToCents(rawPrincipal);
+    const monthlyContributionCents = dollarsToCents(rawMonthly);
 
     const result = calculateCompoundInterest({
       initialPrincipalCents,
       monthlyContributionCents,
       annualInterestRatePercent: annualRate,
       horizonMonths: months,
-      contributionTiming: contributionTiming as any,
+      contributionTiming: safeTiming,
     });
 
-    // Format schedule for frontend charts and table
     const formattedSchedule = result.schedule.map((entry) => ({
       month: entry.month,
       year: entry.year,
@@ -112,8 +121,8 @@ router.post('/savings/simulate', async (req: Request, res: Response) => {
       })),
       schedule: formattedSchedule,
     });
-  } catch (error: any) {
-    res.status(500).json({ error: 'Simulation failed', details: error.message });
+  } catch {
+    res.status(500).json({ error: 'Simulation failed' });
   }
 });
 
@@ -131,29 +140,42 @@ router.post('/savings', requireAuth, async (req: Request, res: Response) => {
       notes,
     } = req.body;
 
-    if (!name || targetAmountDollars === undefined) {
+    if (!name || typeof name !== 'string' || targetAmountDollars === undefined) {
       res.status(400).json({ error: 'Name and target amount are required' });
       return;
     }
 
+    const cleanName = name.trim().slice(0, 120);
+    if (!cleanName) {
+      res.status(400).json({ error: 'Invalid goal name' });
+      return;
+    }
+
+    const safeTarget = Math.max(0, Math.min(MAX_SIM_PRINCIPAL, Number(targetAmountDollars) || 0));
+    const safePrincipal = Math.max(0, Math.min(MAX_SIM_PRINCIPAL, Number(initialPrincipalDollars) || 0));
+    const safeContribution = Math.max(0, Math.min(MAX_SIM_CONTRIBUTION, Number(monthlyContributionDollars) || 0));
+    const safeRate = Math.max(0, Math.min(100, Number(annualInterestRatePercent) || 0));
+    const safeHorizon = Math.max(1, Math.min(600, parseInt(String(horizonMonths), 10) || 36));
+    const safeTiming = contributionTiming === 'BEGINNING_OF_PERIOD' ? 'BEGINNING_OF_PERIOD' : 'END_OF_PERIOD';
+
     const goal = await prisma.savingsGoal.create({
       data: {
         userId: req.user!.id,
-        name,
-        targetAmountCents: dollarsToCents(Number(targetAmountDollars)),
-        initialPrincipalCents: dollarsToCents(Number(initialPrincipalDollars)),
-        monthlyContributionCents: dollarsToCents(Number(monthlyContributionDollars)),
-        annualInterestRateBps: Math.round(Number(annualInterestRatePercent) * 100),
-        horizonMonths: parseInt(horizonMonths, 10),
-        currentBalanceCents: dollarsToCents(Number(initialPrincipalDollars)),
-        contributionTiming,
-        notes: notes || null,
+        name: cleanName,
+        targetAmountCents: dollarsToCents(safeTarget),
+        initialPrincipalCents: dollarsToCents(safePrincipal),
+        monthlyContributionCents: dollarsToCents(safeContribution),
+        annualInterestRateBps: Math.round(safeRate * 100),
+        horizonMonths: safeHorizon,
+        currentBalanceCents: dollarsToCents(safePrincipal),
+        contributionTiming: safeTiming,
+        notes: typeof notes === 'string' ? notes.trim().slice(0, 500) : null,
       },
     });
 
     res.status(201).json(goal);
-  } catch (error: any) {
-    res.status(500).json({ error: 'Failed to create savings goal', details: error.message });
+  } catch {
+    res.status(500).json({ error: 'Failed to create savings goal' });
   }
 });
 

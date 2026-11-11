@@ -8,10 +8,11 @@ services:
     container_name: financial_board_backend
     restart: unless-stopped
     environment:
+      - NODE_ENV=production
       - PORT=5000
       - DATABASE_URL=file:/app/data/family_finance.db
-      - JWT_SECRET=production-secret-family-financial-board-2026-key
-      - CORS_ORIGIN=*
+      - JWT_SECRET=${JWT_SECRET:?Set a strong 32+ char JWT_SECRET in your .env file}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost}
     volumes:
       - ./data:/app/data
     networks:

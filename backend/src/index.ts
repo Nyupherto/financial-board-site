@@ -6,21 +6,50 @@ import dashboardRoutes from './routes/dashboard.routes.js';
 import transactionRoutes from './routes/transaction.routes.js';
 import savingsRoutes from './routes/savings.routes.js';
 import exportRoutes from './routes/export.routes.js';
+import { createRateLimiter, securityHeaders } from './middleware/rateLimiter.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
+// Hide server technology fingerprint
+app.disable('x-powered-by');
+
+// Apply defensive HTTP security headers
+app.use(securityHeaders);
+
+// Configure CORS with explicit allowed origins in production
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost'];
+
 app.use(
   cors({
-    origin: '*', // Allow local development and container networks
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
-app.use(express.json());
+
+// Limit JSON request payload size to prevent memory exhaustion DoS
+app.use(express.json({ limit: '100kb' }));
+
+// Global API rate limiter (240 requests per minute per IP)
+app.use(
+  '/api',
+  createRateLimiter({
+    windowMs: 60 * 1000,
+    maxRequests: 240,
+    message: 'Too many requests. Please slow down.',
+  })
+);
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -29,20 +58,18 @@ app.use('/api', transactionRoutes);
 app.use('/api', savingsRoutes);
 app.use('/api', exportRoutes);
 
-// Health Check
+// Health Check (minimal non-sensitive response)
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'online',
-    system: 'Personal & Family Financial Management Dashboard',
-    version: '1.0.0',
     timestamp: new Date().toISOString(),
   });
 });
 
-// Global Error Handler
+// Global Error Handler (never leak stack traces or internal error messages to client)
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('Unhandled Application Error:', err);
-  res.status(500).json({ error: 'Internal Server Error', message: err.message });
+  console.error('Unhandled Application Error:', err?.message || 'Unknown error');
+  res.status(500).json({ error: 'Internal Server Error' });
 });
 
 // Start server

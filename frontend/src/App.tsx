@@ -135,16 +135,8 @@ export const App: React.FC = () => {
     }
   }, [currentUser, year, month, activeUserId]);
 
-  const handleSelectUser = async (newUserId: string) => {
+  const handleSelectUser = (newUserId: string) => {
     setActiveUserId(newUserId);
-    if (newUserId !== 'all') {
-      try {
-        const res = await api.switchProfile(newUserId);
-        setCurrentUser(res.user);
-      } catch (err) {
-        console.error('Profile switch error:', err);
-      }
-    }
   };
 
   const handleLogout = () => {
