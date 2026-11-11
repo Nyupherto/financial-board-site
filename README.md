@@ -6,13 +6,9 @@ A modern, production-grade financial management platform tailored for a **5-memb
 
 ## ✨ Key Features
 
-### 1. 🔐 Multi-User Authentication & Strong Password Policy
-- **Lightweight JWT Auth:** Supports up to 5 family member profiles with Role-Based Access Control (`ADMIN` and `MEMBER`).
-- **Real-Time Password Validation:** Reactive visual checklist enforcing security standards:
-  - Minimum of 8 characters.
-  - At least 1 uppercase letter (`A-Z`).
-  - At least 1 lowercase letter (`a-z`).
-  - At least 1 special character (`!@#$%^&*`).
+### 1. 🔐 Multi-User Authentication & Access Control
+- **Session & JWT Authentication:** Supports up to 5 family member profiles with Role-Based Access Control (`ADMIN` and `MEMBER`).
+- **Interactive Registration & Login:** Clean authentication interface with email/password confirmation and interactive feedback.
 - **Zero Mock / Clean Slate:** The database starts with 0 hardcoded dummy transactions or fake users. Every record is dynamic.
 
 ### 2. 💱 Multi-Currency & Manual Exchange Rate Converter (BRL / USD / EUR)
@@ -57,8 +53,8 @@ A modern, production-grade financial management platform tailored for a **5-memb
 - **Smart Allocations:** Automatically reserves surplus cash flow into target buckets (Emergency Reserve 40%, Wealth Investments 40%, Leisure 20%).
 
 ### 7. 💾 Backup & Data Export
-- 1-click **CSV Export** for spreadsheets.
-- 1-click full **JSON Database Snapshot** backup.
+- 1-click **CSV Export** for spreadsheets (protected against formula injection).
+- 1-click **JSON Database Snapshot** backup.
 
 ---
 
@@ -67,10 +63,10 @@ A modern, production-grade financial management platform tailored for a **5-memb
 ```
 FinancialBoard/
 ├── backend/                  # Node.js + Express + Prisma ORM + TypeScript
-│   ├── prisma/               # SQLite Schema & Migration scripts
+│   ├── prisma/               # SQLite Schema & Seed scripts
 │   ├── src/
 │   │   ├── math/             # Safe integer-cents currency & compound interest math
-│   │   ├── middleware/       # JWT Authentication & role protection
+│   │   ├── middleware/       # Authentication, rate limiting & security headers
 │   │   └── routes/           # REST endpoints (auth, dashboard, transactions, savings, export)
 │   └── Dockerfile
 ├── frontend/                 # React 18 + Vite + Tailwind CSS + TypeScript
@@ -81,7 +77,8 @@ FinancialBoard/
 │   └── Dockerfile
 ├── docker-compose.yml        # Multi-container orchestration (Backend + Frontend + Caddy)
 ├── Caddyfile                 # Reverse proxy pre-configured for automatic HTTPS / TLS
-├── .gitignore                # Excludes node_modules, dist, and local database files
+├── .env.example              # Environment configuration template
+├── .gitignore                # Excludes node_modules, dist, .env, and local database files
 └── package.json              # Monorepo concurrency scripts
 ```
 
@@ -100,7 +97,7 @@ FinancialBoard/
    cd financial-board-site
    ```
 
-2. Install root dependencies:
+2. Install dependencies:
    ```bash
    npm install
    ```
@@ -113,36 +110,15 @@ FinancialBoard/
 4. Open your browser at:
    👉 **`http://localhost:5173`**
 
-The backend API will run simultaneously on `http://localhost:5000`.
-
 ---
 
-## 🐳 Docker Deployment & HTTPS (DuckDNS / GCP Ready)
+## 🐳 Docker Deployment & HTTPS
 
-The repository includes a ready-to-run containerized setup with **Caddy Reverse Proxy** for automatic SSL/TLS certificates:
-
-```bash
-docker compose up -d
-```
-
-### Automatic HTTPS Configuration:
-1. Point your domain or DuckDNS subdomain (e.g. `yourfamilyfinance.duckdns.org`) to your server IP.
-2. In `Caddyfile`, replace `:80, :443` with your domain:
-   ```caddy
-   yourfamilyfinance.duckdns.org {
-       handle /api/* {
-           reverse_proxy backend:5000
-       }
-       handle /* {
-           reverse_proxy frontend:80
-       }
-   }
-   ```
-3. Restart Caddy:
+1. Copy `.env.example` to `.env` and set a strong `JWT_SECRET`.
+2. Start the containers with **Caddy Reverse Proxy**:
    ```bash
-   docker compose restart caddy
+   docker compose up -d
    ```
-   Caddy will automatically generate and renew a free Let's Encrypt SSL/TLS certificate.
 
 ---
 
