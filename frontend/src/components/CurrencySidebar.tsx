@@ -1,5 +1,5 @@
 import React from 'react';
-import { Coins, DollarSign, Euro, ArrowRightLeft } from 'lucide-react';
+import { Coins, DollarSign, Euro, ArrowRightLeft, Percent } from 'lucide-react';
 import { CurrencyMode, ExchangeRates } from '../utils/currency';
 
 interface CurrencySidebarProps {
@@ -7,6 +7,8 @@ interface CurrencySidebarProps {
   onSelectCurrency: (c: CurrencyMode) => void;
   rates: ExchangeRates;
   onChangeRates: (rates: ExchangeRates) => void;
+  annualInterestRate: number;
+  onChangeInterestRate: (rate: number) => void;
 }
 
 export const CurrencySidebar: React.FC<CurrencySidebarProps> = ({
@@ -14,7 +16,11 @@ export const CurrencySidebar: React.FC<CurrencySidebarProps> = ({
   onSelectCurrency,
   rates,
   onChangeRates,
+  annualInterestRate,
+  onChangeInterestRate,
 }) => {
+  const monthlyEquivalent = (((Math.pow(1 + (annualInterestRate || 0) / 100 / 12, 1) - 1) * 100)).toFixed(2);
+
   return (
     <div className="space-y-3">
       {/* Box 1: Seletor de Moeda Visualizada (BRL / USD / EUR) */}
@@ -143,6 +149,43 @@ export const CurrencySidebar: React.FC<CurrencySidebarProps> = ({
         <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-500 font-mono">
           <span>Base: R$ 1,00</span>
           <span>1 R$ = € {rates.eur > 0 ? (1 / rates.eur).toFixed(4) : '0.0000'}</span>
+        </div>
+      </div>
+
+      {/* Box 4: Taxa de Juros Interna (Metas / Savings) */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg hover:border-violet-500/30 transition-colors">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-400">
+              <Percent className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-slate-200">Juros Interno (Savings)</h4>
+              <p className="text-[10px] text-slate-400">Taxa anual aplicada às suas Metas</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 mt-2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 focus-within:border-violet-500 transition-colors">
+          <span className="text-xs font-mono text-slate-400 shrink-0">Taxa (% a.a.)</span>
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            max="100"
+            value={annualInterestRate}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              onChangeInterestRate(Number.isFinite(val) && val >= 0 ? Math.min(100, val) : 0);
+            }}
+            placeholder="10.0"
+            className="w-full bg-transparent text-right text-sm font-mono font-bold text-violet-400 focus:outline-none"
+          />
+          <span className="text-xs font-mono text-violet-400 font-bold">%</span>
+        </div>
+        <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-500 font-mono">
+          <span>Juros Compostos</span>
+          <span>~ {monthlyEquivalent}% ao mês</span>
         </div>
       </div>
 

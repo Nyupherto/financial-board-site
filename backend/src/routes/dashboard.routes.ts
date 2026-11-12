@@ -13,18 +13,16 @@ const DEFAULT_BUCKET_RULES: AllocationBucketRule[] = [
   { id: 'bucket-leisure', name: 'Lazer & Qualidade de Vida', targetPercentage: 20 },
 ];
 
-function buildUserScopeFilter(reqUser: { id: string; role: string }, requestedUserId?: string) {
+function buildUserScopeFilter(reqUser: { id: string }, requestedUserId?: string) {
   const isFamilyView = !requestedUserId || requestedUserId === 'all';
-  const isAdmin = reqUser.role === 'ADMIN';
 
   if (isFamilyView) {
-    if (isAdmin) return {};
     return {
       OR: [{ userId: reqUser.id }, { isShared: true }],
     };
   }
 
-  if (isAdmin || requestedUserId === reqUser.id) {
+  if (requestedUserId === reqUser.id) {
     return { userId: requestedUserId };
   }
 
@@ -75,14 +73,13 @@ router.get('/summary', requireAuth, async (req: Request, res: Response) => {
       categoryName: tx.category.name,
       description: tx.description,
       amountCents: tx.amountCents,
-      type: tx.type as 'INCOME' | 'EXPENSE',
+      type: tx.type as 'INCOME' | 'EXPENSE' | 'SAVINGS',
       status: tx.status as 'PAID' | 'PENDING',
       dueDate: tx.dueDate.toISOString(),
       paidAt: tx.paidAt?.toISOString() ?? null,
       isShared: tx.isShared,
     }));
 
-    // Find custom bucket rules or fallback to default allocation proportions
     const monthlyRecord = await prisma.monthlyRecord.findFirst({
       where: { year, month, userId: null },
       include: { allocations: true },
@@ -98,7 +95,7 @@ router.get('/summary', requireAuth, async (req: Request, res: Response) => {
     const bucketRules = customRules.length > 0 ? customRules : DEFAULT_BUCKET_RULES;
     const cashFlow = calculateCashFlow(txItems, bucketRules);
 
-    // Compute Category Breakdown for Donut Chart
+    // Compute Category Breakdown for Donut Chart (Expenses + Savings allocations)
     const expenseCategoriesMap = new Map<string, { name: string; amountCents: number; color: string; count: number }>();
     for (const tx of rawTransactions) {
       if (tx.type === 'EXPENSE') {
@@ -155,7 +152,7 @@ router.get('/summary', requireAuth, async (req: Request, res: Response) => {
       categoryId: tx.categoryId,
       description: tx.description,
       amountCents: tx.amountCents,
-      type: tx.type as 'INCOME' | 'EXPENSE',
+      type: tx.type as 'INCOME' | 'EXPENSE' | 'SAVINGS',
       status: tx.status as 'PAID' | 'PENDING',
     }));
 
@@ -170,12 +167,14 @@ router.get('/summary', requireAuth, async (req: Request, res: Response) => {
         totalExpensesDollars: centsToDollars(cashFlow.totalExpensesCents),
         totalPaidDollars: centsToDollars(cashFlow.totalPaidExpensesCents),
         totalPendingDollars: centsToDollars(cashFlow.totalPendingExpensesCents),
+        totalSavingsDollars: centsToDollars(cashFlow.totalSavingsCents),
         netRemainingCashFlowDollars: centsToDollars(cashFlow.netRemainingCashFlowCents),
         netLiquidCashOnHandDollars: centsToDollars(cashFlow.netLiquidCashOnHandCents),
         savingsRatePercent: cashFlow.savingsRatePercent,
         expenseToIncomeRatioPercent: cashFlow.expenseToIncomeRatioPercent,
         pendingLiabilitiesCount: cashFlow.pendingLiabilitiesCount,
         paidLiabilitiesCount: cashFlow.paidLiabilitiesCount,
+        savingsTransactionsCount: cashFlow.savingsTransactionsCount,
         isDeficit: cashFlow.isDeficit,
         deficitAmountDollars: centsToDollars(cashFlow.deficitAmountCents),
       },
@@ -242,7 +241,7 @@ router.get('/history', requireAuth, async (req: Request, res: Response) => {
         categoryId: t.categoryId,
         description: t.description,
         amountCents: t.amountCents,
-        type: t.type as 'INCOME' | 'EXPENSE',
+        type: t.type as 'INCOME' | 'EXPENSE' | 'SAVINGS',
         status: t.status as 'PAID' | 'PENDING',
       }));
 
@@ -253,6 +252,7 @@ router.get('/history', requireAuth, async (req: Request, res: Response) => {
         periodLabel: `${monthNames[m - 1]}/${String(y).slice(-2)}`,
         income: centsToDollars(cf.totalIncomeCents),
         expenses: centsToDollars(cf.totalExpensesCents),
+        savings: centsToDollars(cf.totalSavingsCents),
         paid: centsToDollars(cf.totalPaidExpensesCents),
         pending: centsToDollars(cf.totalPendingExpensesCents),
         netCashFlow: centsToDollars(cf.netRemainingCashFlowCents),

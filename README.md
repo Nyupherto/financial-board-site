@@ -1,60 +1,59 @@
-# 📊 FamilyFinance — Personal & Family Financial Dashboard
+# 📊 Finance.ME — Personal Financial & Goals Dashboard
 
-A modern, production-grade financial management platform tailored for a **5-member family base**. Built with a **Zero-Float Integer Cents Ledger** on **SQLite (Prisma ORM)**, an **Offline Deterministic Financial Mathematics Engine**, a **Smart Natural-Language Parser** for free-form multi-line accounting entries, and a **Manual Multi-Currency Converter (BRL / USD / EUR)**.
+**Finance.ME** is a modern, full-stack financial management and goal-tracking platform built with a **Zero-Float Integer Cents Ledger** on **SQLite (Prisma ORM)**, a **Deterministic Compound Interest Engine** for individual Savings Goals, a **Smart Natural-Language Parser** supporting `k`/`kk` shorthand multipliers, and a **Manual Multi-Currency & Internal Interest Rate Converter (BRL / USD / EUR)**.
 
 ---
 
 ## ✨ Key Features
 
-### 1. 🔐 Multi-User Authentication & Access Control
-- **Session & JWT Authentication:** Supports up to 5 family member profiles with Role-Based Access Control (`ADMIN` and `MEMBER`).
-- **Interactive Registration & Login:** Clean authentication interface with email/password confirmation and interactive feedback.
+### 1. 🔐 Account Authentication & Password Recovery
+- **Session & JWT Authentication:** Supports up to 5 individual profiles with strict ownership access control.
+- **Password Recovery ("Esqueci minha senha"):** Built-in password reset flow on the authentication screen.
 - **Zero Mock / Clean Slate:** The database starts with 0 hardcoded dummy transactions or fake users. Every record is dynamic.
 
-### 2. 💱 Multi-Currency & Manual Exchange Rate Converter (BRL / USD / EUR)
-- Located on the dedicated right-hand sidebar.
-- **Base Currency:** Fixed at **1 Real (R$ 1.00)**.
-- **Manual Rate Inputs:** Enter custom exchange rates for **USD ($)** and **EUR (€)** (e.g. `1 USD = R$ 5.50`, `1 EUR = R$ 6.00`).
-- **Dynamic UI Cascading:** Switching between `R$`, `$`, and `€` immediately recalculates and formats all metrics, summary cards, charts, and ledger entries in real time based on your defined rates.
+### 2. 💱 Multi-Currency & Internal Interest Rate Sidebar (BRL / USD / EUR + % Rate)
+- Located on the dedicated right-hand sidebar:
+  - **Base Currency:** Fixed at **1 Real (R$ 1.00)**.
+  - **Manual Exchange Rate Inputs:** Set custom conversion rates for **USD ($)** and **EUR (€)** (e.g. `1 USD = R$ 5.50`, `1 EUR = R$ 6.00`).
+  - **Internal Interest Rate (Juros Interno):** Set the annual interest rate (`% a.a.`) applied to your **Savings / Metas** to evaluate compound growth in real time.
 
-### 3. ✍️ Smart Natural Language Free-Text Parser
-- Replace tedious repetitive form filling with a **single multi-line text box**.
-- Paste or type entries freely:
+### 3. ✍️ Smart Natural Language Parser with `k` / `K` Multiplier (`x1000`)
+- Type or paste multiple financial entries at once in a single free-text box.
+- **Shorthand `k` / `K` Multiplier (`x1000`):**
+  - `3k` or `3K` $\rightarrow$ `3,000`
+  - `3kk` or `3KK` $\rightarrow$ `3,000,000`
+  - `1.5k` or `1,5k` $\rightarrow$ `1,500`
   ```text
-  Salário: +2.300
+  Salário: +3k
+  Meta Reserva: 1.5k
   Feira: 800
-  Brinde 200
   Bonus 144,75
-  Carroceria do carro = 500
+  Patrimônio = 3kk
   ```
-- **Semantic Inference:** Automatically classifies terms into **+ Income** (*Salário*, *Bônus*, *Brinde*, *Receita*) or **- Expense** (*Feira*, *Carroceria*, *Contas*).
-- **Automatic Grouping:** Intelligently allocates entries into categories (*Mantimento*, *Despesas com Carro*, *Renda & Ganhos*, *Lazer*, *Moradia*).
-- **Pre-Save Interactive Review:** Review parsed lines, switch groups, adjust values, and save to SQLite in a single batch.
+- **3-Way Semantic Classification:** Automatically classifies entries into:
+  - **`+ Acréscimo` (`INCOME`)**: *Salário*, *Bônus*, *Brinde*, *Receita*, *Ganhos*
+  - **`- Decréscimo` (`EXPENSE`)**: *Feira*, *Contas*, *Carro*, *Lazer*
+  - **`🎯 Meta / Savings` (`SAVINGS`)**: *Meta*, *Savings*, *Reserva*, *Poupança*, *Investimento*, *Aporte*
 
-### 4. 📂 Group Management & Reallocation
-- Move any transaction between groups with one click (e.g., move *"Carroceria do carro"* from *"Despesas com Carro"* to *"Ganhos com a Oficina"*).
-- Adjust transaction amounts inline with quick `+` and `-` buttons or click to edit exact numbers.
-- Toggle between `+ Acréscimo` and `- Decréscimo` anytime.
-- Create custom groups with dedicated color coding.
+### 4. 🎯 Individual Goals (Metas / Savings) & Compound Interest ETA Engine
+- A dedicated **3rd group type (`Meta / Savings`)** alongside Income and Expenses.
+- **Individual Target (`Meta Individual`):** Define or edit the target value for each Savings group (supports `k`/`kk` notation, e.g., `50k`).
+- **Historical Flow & Monthly Average:** Tracks how much was invested across recent months and automatically calculates your **Average Monthly Contribution (`Média de Entrada Mensal`)**.
+- **Deterministic Time-to-Goal & Compound Interest Evaluation:** Uses the offline compound interest mathematics engine together with your configured **Internal Interest Rate** and **Monthly Average Inflow** to calculate:
+  - Exact time remaining to hit each goal (**with compound interest** vs **without interest**).
+  - Total out-of-pocket principal vs compound interest earned over the goal horizon.
+  - Interactive growth curve for each individual goal.
 
-### 5. 🧮 100% Offline Compound Interest & Wealth Simulator
-- Deterministic bank ledger growth simulation running purely on the local client/server (no external stock or Selic APIs).
-- Interactive sliders for:
-  - Initial Principal ($P$)
-  - Monthly Contribution ($PMT$)
-  - Annual Interest Rate ($i$)
-  - Time Horizon ($n$)
-- Outputs Future Value ($FV$), total out-of-pocket investment, compound interest accrued, growth curve chart, and wealth milestones ($10k, $50k, $100k, $500k, $1M).
+### 5. 📂 Group Management & Reallocation
+- Move any entry between groups (`Despesas`, `Mantimento`, `Lazer`, `Despesas com Carro`, `Ganhos com a Oficina`, `Metas & Savings`, or custom groups) with one click.
+- Adjust values inline with `+` / `-` buttons or click to type exact values (including `3k` / `1.5k` notation).
+- Cycle any entry between `+ Acréscimo`, `🎯 Meta / Savings`, and `- Decréscimo`.
 
-### 6. 📈 Visualizations & Real-Time Balance Engine
+### 6. 📈 Visualizations, Smart Surplus Allocation & Safe Export
 - **Summary Cards:** Total Income, Paid Bills, Pending Liabilities, and Net Remaining Cash Flow.
-- **Donut Chart:** Expense breakdown by group/category with interactive tooltips.
-- **12-Month History Chart:** Historical trend comparing Income vs Expenses vs Net Cash Flow.
-- **Smart Allocations:** Automatically reserves surplus cash flow into target buckets (Emergency Reserve 40%, Wealth Investments 40%, Leisure 20%).
-
-### 7. 💾 Backup & Data Export
-- 1-click **CSV Export** for spreadsheets (protected against formula injection).
-- 1-click **JSON Database Snapshot** backup.
+- **Donut & 12-Month History Charts:** Category breakdown and historical cash flow trend.
+- **Smart Allocations:** Distributes net monthly surplus across target buckets.
+- **1-Click Export:** Formula-sanitized **CSV Export** and **JSON Snapshot Backup**.
 
 ---
 
@@ -65,20 +64,19 @@ FinancialBoard/
 ├── backend/                  # Node.js + Express + Prisma ORM + TypeScript
 │   ├── prisma/               # SQLite Schema & Seed scripts
 │   ├── src/
-│   │   ├── math/             # Safe integer-cents currency & compound interest math
-│   │   ├── middleware/       # Authentication, rate limiting & security headers
+│   │   ├── math/             # Integer-cents currency, cash flow & compound interest Goal ETA engine
+│   │   ├── middleware/       # JWT Authentication, rate limiting & security headers
 │   │   └── routes/           # REST endpoints (auth, dashboard, transactions, savings, export)
 │   └── Dockerfile
 ├── frontend/                 # React 18 + Vite + Tailwind CSS + TypeScript
 │   ├── src/
-│   │   ├── components/       # Header, SummaryCards, ExpenseDonutChart, CurrencySidebar, etc.
+│   │   ├── components/       # Header, SummaryCards, TransactionLedger, SavingsGoalsPanel, CurrencySidebar
 │   │   ├── services/         # API client
-│   │   └── utils/            # Currency converter & Smart Textarea Parser
+│   │   └── utils/            # Currency converter & Smart Textarea Parser (with k/kk support)
 │   └── Dockerfile
 ├── docker-compose.yml        # Multi-container orchestration (Backend + Frontend + Caddy)
 ├── Caddyfile                 # Reverse proxy pre-configured for automatic HTTPS / TLS
 ├── .env.example              # Environment configuration template
-├── .gitignore                # Excludes node_modules, dist, .env, and local database files
 └── package.json              # Monorepo concurrency scripts
 ```
 
@@ -86,45 +84,24 @@ FinancialBoard/
 
 ## 🚀 Quick Start (Local Development)
 
-### Prerequisites
-- [Node.js](https://nodejs.org/) (v18 or higher)
-- [npm](https://www.npmjs.com/) (v9 or higher)
-
-### Installation & Run
-
-1. Clone or open the repository folder:
-   ```bash
-   cd financial-board-site
-   ```
-
-2. Install dependencies:
+1. Install dependencies:
    ```bash
    npm install
    ```
 
-3. Start both backend and frontend concurrently with a single command:
+2. Start both backend and frontend concurrently:
    ```bash
    npm run dev
    ```
 
-4. Open your browser at:
+3. Open your browser at:
    👉 **`http://localhost:5173`**
-
----
-
-## 🐳 Docker Deployment & HTTPS
-
-1. Copy `.env.example` to `.env` and set a strong `JWT_SECRET`.
-2. Start the containers with **Caddy Reverse Proxy**:
-   ```bash
-   docker compose up -d
-   ```
 
 ---
 
 ## 🧪 Automated Testing
 
-Run the financial mathematics and currency test suites:
+Run the financial mathematics, cash flow, and compound interest test suites:
 
 ```bash
 npm run test

@@ -4,7 +4,8 @@ import {
   CashFlowHistoryItem,
   Transaction,
   Category,
-  SimulationResult,
+  EntryType,
+  SavingsOverviewResponse,
 } from '../types';
 
 const API_BASE = '/api';
@@ -47,7 +48,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const api = {
-  // Auth & Family Profiles
+  // Auth & Profiles
   getUsers: () => request<UserProfile[]>('/auth/users'),
 
   login: async (email: string, password: string) => {
@@ -74,13 +75,16 @@ export const api = {
     return res;
   },
 
-  switchProfile: async (userId: string) => {
-    const res = await request<{ token: string; user: UserProfile }>('/auth/switch-profile', {
+  forgotPassword: async (data: {
+    email: string;
+    name: string;
+    newPassword: string;
+    confirmPassword: string;
+  }) => {
+    return request<{ success: boolean; message: string }>('/auth/forgot-password', {
       method: 'POST',
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify(data),
     });
-    setAuthToken(res.token);
-    return res;
   },
 
   getCurrentUser: () => request<UserProfile>('/auth/me'),
@@ -114,7 +118,7 @@ export const api = {
   // Categories / Groups
   getCategories: () => request<Category[]>('/categories'),
 
-  createCategory: (data: { name: string; type?: 'INCOME' | 'EXPENSE'; color?: string }) =>
+  createCategory: (data: { name: string; type?: EntryType; color?: string }) =>
     request<Category>('/categories', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -137,12 +141,11 @@ export const api = {
   createTransaction: (data: {
     description: string;
     amountDollars: number;
-    type: 'INCOME' | 'EXPENSE';
+    type: EntryType;
     status: 'PAID' | 'PENDING';
     categoryId?: string;
     categoryName?: string;
     dueDate: string;
-    userId?: string;
     isShared?: boolean;
     notes?: string;
   }) =>
@@ -155,12 +158,11 @@ export const api = {
     items: {
       description: string;
       amount: number;
-      type: 'INCOME' | 'EXPENSE';
+      type: EntryType;
       groupName: string;
       status?: 'PAID' | 'PENDING';
     }[];
     dueDate: string;
-    userId?: string;
   }) =>
     request<Transaction[]>('/transactions/batch', {
       method: 'POST',
@@ -174,7 +176,7 @@ export const api = {
       amountDollars?: number;
       categoryId?: string;
       categoryName?: string;
-      type?: 'INCOME' | 'EXPENSE';
+      type?: EntryType;
       status?: 'PAID' | 'PENDING';
     }
   ) =>
@@ -193,17 +195,28 @@ export const api = {
       method: 'DELETE',
     }),
 
-  // Offline Compound Interest Simulation
-  simulateSavings: (params: {
-    initialPrincipalDollars: number;
-    monthlyContributionDollars: number;
-    annualInterestRatePercent: number;
-    horizonMonths: number;
-    contributionTiming?: 'END_OF_PERIOD' | 'BEGINNING_OF_PERIOD';
-  }) =>
-    request<SimulationResult>('/savings/simulate', {
-      method: 'POST',
-      body: JSON.stringify(params),
+  // Savings & Individual Goals (Metas)
+  getSavingsOverview: (params: {
+    annualInterestRate: number;
+    year: number;
+    month: number;
+    userId?: string;
+  }) => {
+    const q = new URLSearchParams({
+      annualInterestRate: params.annualInterestRate.toString(),
+      year: params.year.toString(),
+      month: params.month.toString(),
+    });
+    if (params.userId && params.userId !== 'all') {
+      q.append('userId', params.userId);
+    }
+    return request<SavingsOverviewResponse>(`/savings/overview?${q.toString()}`);
+  },
+
+  updateSavingsTarget: (data: { groupName: string; targetAmountDollars: number }) =>
+    request<{ id: string; groupName: string; targetAmountDollars: number }>('/savings/target', {
+      method: 'PUT',
+      body: JSON.stringify(data),
     }),
 
   // Data Export URL triggers
@@ -215,7 +228,7 @@ export const api = {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `family-financial-transactions-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `financeme-transactions-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
   },
@@ -228,7 +241,7 @@ export const api = {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `family-financial-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `financeme-backup-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     window.URL.revokeObjectURL(url);
   },

@@ -3,9 +3,8 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🧹 Executando limpeza total do banco de dados (Zero Usuários, Zero Transações)...');
+  console.log('🧹 Executando limpeza total do banco de dados Finance.ME (Zero Usuários, Zero Transações)...');
 
-  // 1. Delete all records in dependent order
   await prisma.allocationBucket.deleteMany();
   await prisma.transaction.deleteMany();
   await prisma.monthlyRecord.deleteMany();
@@ -13,7 +12,6 @@ async function main() {
   await prisma.user.deleteMany();
   await prisma.category.deleteMany();
 
-  // 2. Create clean functional Group Categories (No transactions, no test values)
   const defaultGroups = [
     { name: 'Despesas', type: 'EXPENSE', icon: 'receipt', color: '#ef4444' },
     { name: 'Mantimento', type: 'EXPENSE', icon: 'shopping-cart', color: '#84cc16' },
@@ -22,6 +20,7 @@ async function main() {
     { name: 'Moradia & Contas', type: 'EXPENSE', icon: 'home', color: '#eab308' },
     { name: 'Renda & Ganhos', type: 'INCOME', icon: 'trending-up', color: '#10b981' },
     { name: 'Ganhos com a Oficina', type: 'INCOME', icon: 'wrench', color: '#06b6d4' },
+    { name: 'Metas & Savings', type: 'SAVINGS', icon: 'target', color: '#8b5cf6' },
   ];
 
   for (const group of defaultGroups) {

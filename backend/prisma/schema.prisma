@@ -1,4 +1,4 @@
-// Prisma Relational Schema for Personal & Family Financial Management Dashboard
+// Prisma Relational Schema for Finance.ME Financial Management Dashboard
 // Uses SQLite for zero-config persistence with strict integer-cents currency fields.
 
 datasource db {
@@ -15,8 +15,8 @@ model User {
   email        String   @unique
   name         String
   passwordHash String
-  role         String   @default("MEMBER") // "ADMIN" | "MEMBER"
-  avatarColor  String   @default("#3b82f6") // Hex color for user badge
+  role         String   @default("MEMBER")
+  avatarColor  String   @default("#3b82f6")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -31,7 +31,7 @@ model User {
 model Category {
   id        String   @id @default(uuid())
   name      String
-  type      String   // "INCOME" | "EXPENSE"
+  type      String   // "INCOME" | "EXPENSE" | "SAVINGS"
   icon      String   @default("tag")
   color     String   @default("#64748b")
   isDefault Boolean  @default(true)
@@ -47,7 +47,7 @@ model MonthlyRecord {
   id                String   @id @default(uuid())
   year              Int
   month             Int      // 1 to 12
-  userId            String?  // null indicates consolidated family record; or individual user profile
+  userId            String?  // null indicates consolidated record; or individual user profile
   totalIncomeCents  Int      @default(0)
   totalPaidCents    Int      @default(0)
   totalPendingCents Int      @default(0)
@@ -72,12 +72,12 @@ model Transaction {
   userId          String
   categoryId      String
   description     String
-  amountCents     Int       // Always stored in integer cents (e.g., $150.00 -> 15000)
-  type            String    // "INCOME" | "EXPENSE"
+  amountCents     Int       // Always stored in integer cents
+  type            String    // "INCOME" | "EXPENSE" | "SAVINGS"
   status          String    @default("PENDING") // "PAID" | "PENDING"
   dueDate         DateTime
   paidAt          DateTime?
-  isShared        Boolean   @default(true) // Whether shared in family overview
+  isShared        Boolean   @default(true)
   notes           String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -97,9 +97,9 @@ model AllocationBucket {
   id                   String   @id @default(uuid())
   monthlyRecordId      String
   userId               String?
-  bucketName           String   // e.g. "Emergency Fund", "Long-Term Investments", "Leisure"
-  targetPercentage     Float?   // Target % (e.g. 50.0 for 50%)
-  allocatedAmountCents Int      @default(0) // Integer cents assigned
+  bucketName           String
+  targetPercentage     Float?
+  allocatedAmountCents Int      @default(0)
   notes                String?
   createdAt            DateTime @default(now())
 
@@ -113,14 +113,14 @@ model AllocationBucket {
 model SavingsGoal {
   id                       String   @id @default(uuid())
   userId                   String
-  name                     String   // e.g., "Emergency Fund (6 Months)", "Retirement Nest Egg"
+  name                     String   // Matches Savings Group name or individual goal name
   targetAmountCents        Int      // Target savings amount in cents
   initialPrincipalCents    Int      // Starting principal P in cents
   monthlyContributionCents Int      // Monthly PMT in cents
-  annualInterestRateBps    Int      // Annual interest rate in Basis Points (e.g. 850 = 8.50%)
+  annualInterestRateBps    Int      // Annual interest rate in Basis Points
   horizonMonths            Int      // Duration n in months
   currentBalanceCents      Int      @default(0)
-  contributionTiming       String   @default("END_OF_PERIOD") // "END_OF_PERIOD" | "BEGINNING_OF_PERIOD"
+  contributionTiming       String   @default("END_OF_PERIOD")
   isCompleted              Boolean  @default(false)
   notes                    String?
   createdAt                DateTime @default(now())

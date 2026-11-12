@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🧹 Inicializando estrutura limpa do banco de dados (Sem usuários ou valores de teste)...');
+  console.log('🧹 Inicializando estrutura limpa do banco de dados Finance.ME (Sem usuários ou valores de teste)...');
 
   await prisma.allocationBucket.deleteMany();
   await prisma.transaction.deleteMany();
@@ -20,6 +20,7 @@ async function main() {
     { name: 'Moradia & Contas', type: 'EXPENSE', icon: 'home', color: '#eab308' },
     { name: 'Renda & Ganhos', type: 'INCOME', icon: 'trending-up', color: '#10b981' },
     { name: 'Ganhos com a Oficina', type: 'INCOME', icon: 'wrench', color: '#06b6d4' },
+    { name: 'Metas & Savings', type: 'SAVINGS', icon: 'target', color: '#8b5cf6' },
   ];
 
   for (const group of defaultGroups) {

@@ -23,7 +23,6 @@ export interface AuthUser {
   id: string;
   email: string;
   name: string;
-  role: 'ADMIN' | 'MEMBER';
 }
 
 declare global {
@@ -36,7 +35,7 @@ declare global {
 
 export function generateToken(user: AuthUser): string {
   return jwt.sign(
-    { id: user.id, email: user.email, name: user.name, role: user.role },
+    { id: user.id, email: user.email, name: user.name },
     JWT_SECRET,
     {
       algorithm: 'HS256',
@@ -67,12 +66,4 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   } catch {
     res.status(401).json({ error: 'Sessão inválida ou expirada.' });
   }
-}
-
-export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  if (!req.user || req.user.role !== 'ADMIN') {
-    res.status(403).json({ error: 'Acesso negado. Privilégios de administrador necessários.' });
-    return;
-  }
-  next();
 }

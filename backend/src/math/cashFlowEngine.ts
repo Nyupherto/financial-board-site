@@ -2,8 +2,8 @@
  * Real-Time Cash Flow & Smart Allocation Balance Engine
  *
  * Implements deterministic double-entry compatible financial balance calculations
- * for family budgets, accounts payable/receivable, paid vs pending liabilities,
- * net remaining liquidity, and bucket allocation rules.
+ * for personal & family budgets, accounts payable/receivable, paid vs pending liabilities,
+ * savings/goal allocations, net remaining liquidity, and bucket allocation rules.
  */
 
 import {
@@ -13,7 +13,7 @@ import {
   distributeCents,
 } from './currency.js';
 
-export type TransactionType = 'INCOME' | 'EXPENSE';
+export type TransactionType = 'INCOME' | 'EXPENSE' | 'SAVINGS';
 export type PaymentStatus = 'PAID' | 'PENDING';
 
 export interface TransactionItem {
@@ -32,9 +32,9 @@ export interface TransactionItem {
 
 export interface AllocationBucketRule {
   id: string;
-  name: string; // e.g. "Emergency Fund", "Long-Term Investments", "Leisure"
-  targetPercentage?: number; // e.g. 50 (for 50%)
-  allocatedAmountCents?: Cents; // Optional manual override
+  name: string;
+  targetPercentage?: number;
+  allocatedAmountCents?: Cents;
 }
 
 export interface BucketAllocationResult {
@@ -49,12 +49,14 @@ export interface MonthlyBalanceSummary {
   totalExpensesCents: Cents;
   totalPaidExpensesCents: Cents;
   totalPendingExpensesCents: Cents;
-  netRemainingCashFlowCents: Cents; // Total Income - Total Expenses (both paid and pending)
-  netLiquidCashOnHandCents: Cents; // Total Income - Total Paid Expenses (actual bank balance)
-  savingsRatePercent: number; // (Net Remaining / Total Income) * 100
+  totalSavingsCents: Cents;
+  netRemainingCashFlowCents: Cents; // Total Income - Total Expenses - Total Savings
+  netLiquidCashOnHandCents: Cents; // Total Income - Total Paid Expenses - Paid Savings
+  savingsRatePercent: number; // ((Net Remaining + Total Savings) / Total Income) * 100
   expenseToIncomeRatioPercent: number; // (Total Expenses / Total Income) * 100
   pendingLiabilitiesCount: number;
   paidLiabilitiesCount: number;
+  savingsTransactionsCount: number;
   allocations: BucketAllocationResult[];
   unallocatedCashFlowCents: Cents;
   isDeficit: boolean;
@@ -72,12 +74,21 @@ export function calculateCashFlow(
   let totalIncomeCents = 0;
   let totalPaidExpensesCents = 0;
   let totalPendingExpensesCents = 0;
+  let totalSavingsCents = 0;
+  let paidSavingsCents = 0;
   let pendingCount = 0;
   let paidCount = 0;
+  let savingsCount = 0;
 
   for (const tx of transactions) {
     if (tx.type === 'INCOME') {
       totalIncomeCents = addCents(totalIncomeCents, tx.amountCents);
+    } else if (tx.type === 'SAVINGS') {
+      totalSavingsCents = addCents(totalSavingsCents, tx.amountCents);
+      savingsCount++;
+      if (tx.status === 'PAID') {
+        paidSavingsCents = addCents(paidSavingsCents, tx.amountCents);
+      }
     } else if (tx.type === 'EXPENSE') {
       if (tx.status === 'PAID') {
         totalPaidExpensesCents = addCents(totalPaidExpensesCents, tx.amountCents);
@@ -90,8 +101,12 @@ export function calculateCashFlow(
   }
 
   const totalExpensesCents = addCents(totalPaidExpensesCents, totalPendingExpensesCents);
-  const netRemainingCashFlowCents = subtractCents(totalIncomeCents, totalExpensesCents);
-  const netLiquidCashOnHandCents = subtractCents(totalIncomeCents, totalPaidExpensesCents);
+  const totalOutflowsCents = addCents(totalExpensesCents, totalSavingsCents);
+  const netRemainingCashFlowCents = subtractCents(totalIncomeCents, totalOutflowsCents);
+  const netLiquidCashOnHandCents = subtractCents(
+    subtractCents(totalIncomeCents, totalPaidExpensesCents),
+    paidSavingsCents
+  );
 
   const isDeficit = netRemainingCashFlowCents < 0;
   const deficitAmountCents = isDeficit ? Math.abs(netRemainingCashFlowCents) : 0;
@@ -103,9 +118,10 @@ export function calculateCashFlow(
       ? 100
       : 0;
 
+  const totalSavedOrRemaining = addCents(Math.max(0, netRemainingCashFlowCents), totalSavingsCents);
   const savingsRatePercent =
     totalIncomeCents > 0
-      ? Number(((Math.max(0, netRemainingCashFlowCents) / totalIncomeCents) * 100).toFixed(2))
+      ? Number(((totalSavedOrRemaining / totalIncomeCents) * 100).toFixed(2))
       : 0;
 
   // Process Smart Bucket Allocations
@@ -113,7 +129,6 @@ export function calculateCashFlow(
   let unallocatedCashFlowCents = Math.max(0, netRemainingCashFlowCents);
 
   if (bucketRules.length > 0 && netRemainingCashFlowCents > 0) {
-    // Check if buckets use percentage weights or fixed amounts
     const hasFixed = bucketRules.some((b) => b.allocatedAmountCents !== undefined);
 
     if (hasFixed) {
@@ -136,7 +151,6 @@ export function calculateCashFlow(
       }
       unallocatedCashFlowCents = subtractCents(netRemainingCashFlowCents, allocatedTotal);
     } else {
-      // Proportional distribution via largest remainder method (no lost cents)
       const weights = bucketRules.map((b) => b.targetPercentage ?? 0);
       const distributed = distributeCents(netRemainingCashFlowCents, weights);
 
@@ -161,12 +175,14 @@ export function calculateCashFlow(
     totalExpensesCents,
     totalPaidExpensesCents,
     totalPendingExpensesCents,
+    totalSavingsCents,
     netRemainingCashFlowCents,
     netLiquidCashOnHandCents,
     savingsRatePercent,
     expenseToIncomeRatioPercent,
     pendingLiabilitiesCount: pendingCount,
     paidLiabilitiesCount: paidCount,
+    savingsTransactionsCount: savingsCount,
     allocations,
     unallocatedCashFlowCents,
     isDeficit,

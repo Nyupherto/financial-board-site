@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
-import { generateToken, requireAuth, requireAdmin, AuthUser } from '../middleware/auth.js';
+import { generateToken, requireAuth, AuthUser } from '../middleware/auth.js';
 import { createRateLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
@@ -25,6 +25,9 @@ const AVATAR_COLORS = [
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Pre-computed dummy hash to equalize timing when email/user does not exist
+const DUMMY_BCRYPT_HASH = '$2a$12$R9h/cIPz0gi.URNNX3kh2OPST9/PgBkqquzi.Ss7KIUgO2t0jWMUW';
+
 export function validatePasswordStrength(password: string): string | null {
   if (password.length < 8) {
     return 'A senha não atende ao tamanho mínimo exigido.';
@@ -44,22 +47,29 @@ export function validatePasswordStrength(password: string): string | null {
   return null;
 }
 
-// List family members (Requires Authentication - prevents public user enumeration)
+// List profiles (Requires Authentication - prevents public user enumeration)
 router.get('/users', requireAuth, async (req: Request, res: Response) => {
   try {
-    const isAdmin = req.user?.role === 'ADMIN';
     const users = await prisma.user.findMany({
       select: {
         id: true,
         name: true,
-        email: isAdmin,
-        role: true,
+        email: true,
         avatarColor: true,
         createdAt: true,
       },
       orderBy: { createdAt: 'asc' },
     });
-    res.json(users);
+
+    // Only expose email for the currently authenticated user
+    const sanitized = users.map((u) => ({
+      id: u.id,
+      name: u.name,
+      email: u.id === req.user?.id ? u.email : '',
+      avatarColor: u.avatarColor,
+    }));
+
+    res.json(sanitized);
   } catch (error) {
     console.error('Error fetching users:', error);
     res.status(500).json({ error: 'Falha ao buscar usuários.' });
@@ -128,14 +138,12 @@ router.post('/register', authRateLimiter, async (req: Request, res: Response) =>
 
     const passwordHash = await bcrypt.hash(password, 12);
     const avatarColor = AVATAR_COLORS[userCount % AVATAR_COLORS.length];
-    const role = userCount === 0 ? 'ADMIN' : 'MEMBER';
 
     const newUser = await prisma.user.create({
       data: {
         name: cleanName,
         email: cleanEmail,
         passwordHash,
-        role,
         avatarColor,
       },
     });
@@ -144,7 +152,6 @@ router.post('/register', authRateLimiter, async (req: Request, res: Response) =>
       id: newUser.id,
       email: newUser.email,
       name: newUser.name,
-      role: newUser.role as 'ADMIN' | 'MEMBER',
     };
 
     const token = generateToken(authUser);
@@ -154,7 +161,6 @@ router.post('/register', authRateLimiter, async (req: Request, res: Response) =>
         id: newUser.id,
         name: newUser.name,
         email: newUser.email,
-        role: newUser.role,
         avatarColor: newUser.avatarColor,
       },
     });
@@ -182,6 +188,7 @@ router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
   try {
     const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
     if (!user) {
+      await bcrypt.compare(password, DUMMY_BCRYPT_HASH);
       res.status(401).json({ error: 'Credenciais inválidas.' });
       return;
     }
@@ -196,7 +203,6 @@ router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role as 'ADMIN' | 'MEMBER',
     };
 
     const token = generateToken(authUser);
@@ -206,7 +212,6 @@ router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,
         avatarColor: user.avatarColor,
       },
     });
@@ -216,42 +221,65 @@ router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
   }
 });
 
-// Switch Profile (Restricted strictly to ADMIN users to prevent privilege escalation)
-router.post('/switch-profile', requireAuth, requireAdmin, async (req: Request, res: Response) => {
-  const { userId } = req.body;
-  if (typeof userId !== 'string' || !userId) {
-    res.status(400).json({ error: 'userId é obrigatório.' });
+// Forgot / Reset Password (verifies registered email + exact full name + strong password policy)
+router.post('/forgot-password', authRateLimiter, async (req: Request, res: Response) => {
+  const { email, name, newPassword, confirmPassword } = req.body;
+
+  if (
+    typeof email !== 'string' ||
+    typeof name !== 'string' ||
+    typeof newPassword !== 'string' ||
+    typeof confirmPassword !== 'string'
+  ) {
+    res.status(400).json({ error: 'Todos os campos de recuperação são obrigatórios.' });
+    return;
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanName = name.trim();
+
+  if (!cleanEmail || !cleanName || cleanEmail.length > 150 || cleanName.length > 80) {
+    res.status(400).json({ error: 'Dados informados inválidos.' });
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    res.status(400).json({ error: 'A confirmação de senha não coincide com a nova senha.' });
+    return;
+  }
+
+  const passwordError = validatePasswordStrength(newPassword);
+  if (passwordError) {
+    res.status(400).json({ error: passwordError });
     return;
   }
 
   try {
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      res.status(404).json({ error: 'Perfil não encontrado.' });
+    const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
+    const isNameMatch =
+      user !== null && user.name.trim().toLowerCase() === cleanName.toLowerCase();
+
+    if (!user || !isNameMatch) {
+      await bcrypt.compare(newPassword, DUMMY_BCRYPT_HASH);
+      res.status(400).json({
+        error: 'Não foi possível validar os dados da conta. Verifique o email e o nome cadastrado.',
+      });
       return;
     }
 
-    const authUser: AuthUser = {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role as 'ADMIN' | 'MEMBER',
-    };
+    const newPasswordHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: newPasswordHash },
+    });
 
-    const token = generateToken(authUser);
     res.json({
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatarColor: user.avatarColor,
-      },
+      success: true,
+      message: 'Senha redefinida com sucesso. Você já pode entrar com a nova senha.',
     });
   } catch (error) {
-    console.error('Switch profile error:', error);
-    res.status(500).json({ error: 'Falha ao trocar perfil.' });
+    console.error('Forgot password error:', error);
+    res.status(500).json({ error: 'Falha ao redefinir a senha.' });
   }
 });
 
@@ -260,7 +288,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
-      select: { id: true, name: true, email: true, role: true, avatarColor: true },
+      select: { id: true, name: true, email: true, avatarColor: true },
     });
     if (!user) {
       res.status(404).json({ error: 'Usuário não encontrado.' });

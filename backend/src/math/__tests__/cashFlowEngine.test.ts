@@ -12,7 +12,7 @@ describe('Financial Math - Cash Flow & Allocation Balance Engine', () => {
     const transactions: TransactionItem[] = [
       {
         id: 'tx-1',
-        userId: 'user-admin',
+        userId: 'user-1',
         categoryId: 'cat-salary',
         description: 'Primary Salary',
         amountCents: dollarsToCents(5000), // $5,000.00 Income
@@ -21,7 +21,7 @@ describe('Financial Math - Cash Flow & Allocation Balance Engine', () => {
       },
       {
         id: 'tx-2',
-        userId: 'user-member-1',
+        userId: 'user-2',
         categoryId: 'cat-utilities',
         description: 'Water Bill',
         amountCents: dollarsToCents(70), // $70.00 Paid Expense
@@ -30,7 +30,7 @@ describe('Financial Math - Cash Flow & Allocation Balance Engine', () => {
       },
       {
         id: 'tx-3',
-        userId: 'user-admin',
+        userId: 'user-1',
         categoryId: 'cat-housing',
         description: 'Condo Fee',
         amountCents: dollarsToCents(150), // $150.00 Pending Expense
@@ -45,6 +45,7 @@ describe('Financial Math - Cash Flow & Allocation Balance Engine', () => {
     expect(summary.totalPaidExpensesCents).toBe(dollarsToCents(70));
     expect(summary.totalPendingExpensesCents).toBe(dollarsToCents(150));
     expect(summary.totalExpensesCents).toBe(dollarsToCents(220));
+    expect(summary.totalSavingsCents).toBe(0);
 
     // Net remaining = Income - Total Expenses (5000 - 220 = $4,780.00)
     expect(summary.netRemainingCashFlowCents).toBe(dollarsToCents(4780));
@@ -57,11 +58,50 @@ describe('Financial Math - Cash Flow & Allocation Balance Engine', () => {
     expect(summary.isDeficit).toBe(false);
   });
 
+  it('correctly tracks SAVINGS (Meta) transactions alongside income and expenses', () => {
+    const transactions: TransactionItem[] = [
+      {
+        id: 'tx-1',
+        userId: 'user-1',
+        categoryId: 'cat-salary',
+        description: 'Salary',
+        amountCents: dollarsToCents(5000),
+        type: 'INCOME',
+        status: 'PAID',
+      },
+      {
+        id: 'tx-2',
+        userId: 'user-1',
+        categoryId: 'cat-expenses',
+        description: 'Bills',
+        amountCents: dollarsToCents(2000),
+        type: 'EXPENSE',
+        status: 'PAID',
+      },
+      {
+        id: 'tx-3',
+        userId: 'user-1',
+        categoryId: 'cat-savings',
+        description: 'Meta Reserva',
+        amountCents: dollarsToCents(1000),
+        type: 'SAVINGS',
+        status: 'PAID',
+      },
+    ];
+
+    const summary = calculateCashFlow(transactions);
+    expect(summary.totalIncomeCents).toBe(dollarsToCents(5000));
+    expect(summary.totalExpensesCents).toBe(dollarsToCents(2000));
+    expect(summary.totalSavingsCents).toBe(dollarsToCents(1000));
+    expect(summary.savingsTransactionsCount).toBe(1);
+    expect(summary.netRemainingCashFlowCents).toBe(dollarsToCents(2000));
+  });
+
   it('correctly allocates cash flow to smart buckets using percentage weights', () => {
     const transactions: TransactionItem[] = [
       {
         id: 'tx-1',
-        userId: 'user-admin',
+        userId: 'user-1',
         categoryId: 'cat-salary',
         description: 'Salary',
         amountCents: dollarsToCents(4000),
@@ -70,7 +110,7 @@ describe('Financial Math - Cash Flow & Allocation Balance Engine', () => {
       },
       {
         id: 'tx-2',
-        userId: 'user-admin',
+        userId: 'user-1',
         categoryId: 'cat-expenses',
         description: 'Fixed Living Costs',
         amountCents: dollarsToCents(2000),
@@ -138,15 +178,10 @@ describe('Financial Math - Cash Flow & Allocation Balance Engine', () => {
 
     const delta = compareMonths(currMonth, prevMonth);
 
-    // Income increased from 4000 to 5000 (+1000, +25%)
     expect(delta.incomeDeltaCents).toBe(dollarsToCents(1000));
     expect(delta.incomeGrowthPercent).toBe(25);
-
-    // Expenses decreased from 2000 to 1800 (-200, -10%)
     expect(delta.expenseDeltaCents).toBe(dollarsToCents(-200));
     expect(delta.expenseGrowthPercent).toBe(-10);
-
-    // Net cash flow went from 2000 to 3200 (+1200, +60%)
     expect(delta.netCashFlowDeltaCents).toBe(dollarsToCents(1200));
     expect(delta.netCashFlowGrowthPercent).toBe(60);
   });

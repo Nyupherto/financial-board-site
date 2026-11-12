@@ -1,9 +1,11 @@
+import { EntryType } from '../types';
+
 export interface ParsedFinancialEntry {
   id: string;
   rawLine: string;
   description: string;
   amount: number;
-  type: 'INCOME' | 'EXPENSE';
+  type: EntryType;
   groupName: string;
   status: 'PAID' | 'PENDING';
 }
@@ -36,7 +38,27 @@ const INCOME_KEYWORDS = [
   'lucro',
 ];
 
-const GROUP_RULES: { groupName: string; keywords: string[]; defaultType?: 'INCOME' | 'EXPENSE' }[] = [
+const SAVINGS_KEYWORDS = [
+  'meta',
+  'savings',
+  'poupança',
+  'poupanca',
+  'reserva',
+  'investimento',
+  'investir',
+  'caixinha',
+  'cofre',
+  'aporte',
+  'guardar',
+  'objetivo',
+];
+
+const GROUP_RULES: { groupName: string; keywords: string[]; defaultType?: EntryType }[] = [
+  {
+    groupName: 'Metas & Savings',
+    keywords: SAVINGS_KEYWORDS,
+    defaultType: 'SAVINGS',
+  },
   {
     groupName: 'Mantimento',
     keywords: [
@@ -141,58 +163,68 @@ const GROUP_RULES: { groupName: string; keywords: string[]; defaultType?: 'INCOM
 ];
 
 /**
- * Parses a Brazilian or standard numeric string into a clean float.
+ * Parses a Brazilian or standard numeric string with optional 'k' / 'K' multipliers
+ * (where each 'k'/'K' multiplies by 1,000) into a clean float.
  * Examples:
+ * - "3k" or "3K" -> 3000
+ * - "3kk" or "3KK" -> 3000000
+ * - "1.5k" or "1,5k" -> 1500
  * - "2.300" -> 2300
  * - "144,75" -> 144.75
  * - "2.300,50" -> 2300.50
  * - "800" -> 800
  */
 export function parseFlexibleNumber(raw: string): number {
-  const cleaned = raw.replace(/[^\d.,]/g, '').trim();
+  const trimmed = raw.trim();
+  if (!trimmed) return 0;
+
+  // Count trailing 'k' or 'K' multipliers (e.g., "3k" -> 1, "3kk" -> 2)
+  const kMatch = trimmed.match(/(k+)\s*$/i);
+  const kCount = kMatch ? kMatch[1].length : 0;
+  const multiplier = Math.pow(1000, kCount);
+
+  const withoutK = kCount > 0 ? trimmed.slice(0, trimmed.length - kMatch![0].length) : trimmed;
+  const cleaned = withoutK.replace(/[^\d.,]/g, '').trim();
   if (!cleaned) return 0;
+
+  let baseValue = 0;
 
   // Both dot and comma present: e.g., 2.300,50 or 2,300.50
   if (cleaned.includes('.') && cleaned.includes(',')) {
     const lastDot = cleaned.lastIndexOf('.');
     const lastComma = cleaned.lastIndexOf(',');
     if (lastComma > lastDot) {
-      // Brazilian format: 2.300,50
-      return parseFloat(cleaned.replace(/\./g, '').replace(',', '.'));
+      baseValue = parseFloat(cleaned.replace(/\./g, '').replace(',', '.'));
     } else {
-      // US format: 2,300.50
-      return parseFloat(cleaned.replace(/,/g, ''));
+      baseValue = parseFloat(cleaned.replace(/,/g, ''));
     }
-  }
-
-  // Only comma present: e.g., 144,75
-  if (cleaned.includes(',')) {
+  } else if (cleaned.includes(',')) {
+    // Only comma present: e.g., 144,75 or 1,5k
     const parts = cleaned.split(',');
-    if (parts.length === 2 && parts[1].length === 3 && parts[0].length <= 3) {
-      // Could be 2,300 thousand separator, but in Brazil comma is decimal unless exact 000
-      if (parts[1] === '000') {
-        return parseFloat(cleaned.replace(/,/g, ''));
-      }
+    if (kCount === 0 && parts.length === 2 && parts[1].length === 3 && parts[0].length <= 3 && parts[1] === '000') {
+      baseValue = parseFloat(cleaned.replace(/,/g, ''));
+    } else {
+      baseValue = parseFloat(cleaned.replace(',', '.'));
     }
-    return parseFloat(cleaned.replace(',', '.'));
-  }
-
-  // Only dot present: e.g., "2.300" (Brazilian thousand) vs "144.75" (decimal)
-  if (cleaned.includes('.')) {
+  } else if (cleaned.includes('.')) {
+    // Only dot present: e.g., "2.300" (Brazilian thousand) vs "1.5k" or "144.75" (decimal)
     const parts = cleaned.split('.');
-    // If dot is followed by exactly 3 digits (like 2.300 or 1.500), treat as thousands in BRL
-    if (parts.length >= 2 && parts[parts.length - 1].length === 3) {
-      return parseFloat(cleaned.replace(/\./g, ''));
+    if (kCount === 0 && parts.length >= 2 && parts[parts.length - 1].length === 3) {
+      baseValue = parseFloat(cleaned.replace(/\./g, ''));
+    } else {
+      baseValue = parseFloat(cleaned);
     }
-    return parseFloat(cleaned);
+  } else {
+    baseValue = parseFloat(cleaned);
   }
 
-  return parseFloat(cleaned);
+  if (!Number.isFinite(baseValue)) return 0;
+  return baseValue * multiplier;
 }
 
 /**
  * Parses multi-line natural text into structured financial entries with automatic
- * semantic type inference (Income vs Expense) and group categorization.
+ * semantic type inference (INCOME vs EXPENSE vs SAVINGS) and group categorization.
  */
 export function parseFinancialText(text: string): ParsedFinancialEntry[] {
   const lines = text.split(/\r?\n/);
@@ -202,14 +234,16 @@ export function parseFinancialText(text: string): ParsedFinancialEntry[] {
     const trimmed = rawLine.trim();
     if (!trimmed) return;
 
-    // Match description + separator/sign + numeric value at the end of the line
+    // Match description + separator/sign + numeric value with optional 'k'/'kk' suffix at the end of the line
     // Examples:
     // "Salário: +2.300"
+    // "Salário: 3k"
+    // "Patrimônio: 3kk"
+    // "Meta Viagem: 1.5k"
     // "Feira: 800"
-    // "Brinde 200"
     // "Bonus 144,75"
     // "Carroceria do carro = 500"
-    const match = trimmed.match(/^(.+?)(?:[:=\s]+)\s*([+-])?\s*(?:R\$|\$|€)?\s*([\d.,]+)\s*$/i);
+    const match = trimmed.match(/^(.+?)(?:[:=\s]+)\s*([+-])?\s*(?:R\$|\$|€)?\s*([\d.,]+\s*k*)\s*$/i);
 
     if (!match) return;
 
@@ -222,25 +256,32 @@ export function parseFinancialText(text: string): ParsedFinancialEntry[] {
 
     const lowerDesc = rawDesc.toLowerCase();
 
-    // Determine INCOME vs EXPENSE
-    let type: 'INCOME' | 'EXPENSE' = 'EXPENSE';
+    // Determine INCOME vs EXPENSE vs SAVINGS
+    let type: EntryType = 'EXPENSE';
+    const isSavingsKeyword = SAVINGS_KEYWORDS.some((kw) => lowerDesc.includes(kw));
+    const isIncomeKeyword = INCOME_KEYWORDS.some((kw) => lowerDesc.includes(kw));
 
-    if (explicitSign === '+') {
+    if (isSavingsKeyword) {
+      type = 'SAVINGS';
+    } else if (explicitSign === '+') {
       type = 'INCOME';
     } else if (explicitSign === '-') {
       type = 'EXPENSE';
-    } else {
-      const isIncomeKeyword = INCOME_KEYWORDS.some((kw) => lowerDesc.includes(kw));
-      type = isIncomeKeyword ? 'INCOME' : 'EXPENSE';
+    } else if (isIncomeKeyword) {
+      type = 'INCOME';
     }
 
     // Determine Group Name
-    let groupName = type === 'INCOME' ? 'Renda & Ganhos' : 'Despesas';
+    let groupName =
+      type === 'SAVINGS'
+        ? 'Metas & Savings'
+        : type === 'INCOME'
+        ? 'Renda & Ganhos'
+        : 'Despesas';
 
     for (const rule of GROUP_RULES) {
       if (rule.keywords.some((kw) => lowerDesc.includes(kw))) {
         groupName = rule.groupName;
-        // Only override type if no explicit sign and not already matched as income
         break;
       }
     }

@@ -16,15 +16,12 @@ function escapeCsvCell(value: string): string {
   return `"${sanitized.replace(/"/g, '""')}"`;
 }
 
-// Export transactions as CSV (scoped by user role)
+// Export transactions as CSV (scoped to authenticated user & shared records)
 router.get('/export/csv', requireAuth, async (req: Request, res: Response) => {
   try {
-    const isAdmin = req.user!.role === 'ADMIN';
-    const whereClause = isAdmin
-      ? {}
-      : {
-          OR: [{ userId: req.user!.id }, { isShared: true }],
-        };
+    const whereClause = {
+      OR: [{ userId: req.user!.id }, { isShared: true }],
+    };
 
     const transactions = await prisma.transaction.findMany({
       where: whereClause,
@@ -51,28 +48,24 @@ router.get('/export/csv', requireAuth, async (req: Request, res: Response) => {
     const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="family-financial-transactions.csv"');
+    res.setHeader('Content-Disposition', 'attachment; filename="financeme-transactions.csv"');
     res.status(200).send(csvContent);
   } catch {
     res.status(500).json({ error: 'Failed to export CSV' });
   }
 });
 
-// Export data snapshot as JSON (scoped by user role, passwordHash never selected)
+// Export data snapshot as JSON (scoped to authenticated user, passwordHash never selected)
 router.get('/export/json', requireAuth, async (req: Request, res: Response) => {
   try {
-    const isAdmin = req.user!.role === 'ADMIN';
-    const txWhere = isAdmin
-      ? {}
-      : {
-          OR: [{ userId: req.user!.id }, { isShared: true }],
-        };
-    const userWhere = isAdmin ? {} : { id: req.user!.id };
+    const txWhere = {
+      OR: [{ userId: req.user!.id }, { isShared: true }],
+    };
 
     const [users, categories, transactions, monthlyRecords, savingsGoals, allocations] = await Promise.all([
       prisma.user.findMany({
-        where: userWhere,
-        select: { id: true, name: true, role: true, avatarColor: true },
+        where: { id: req.user!.id },
+        select: { id: true, name: true, avatarColor: true },
       }),
       prisma.category.findMany(),
       prisma.transaction.findMany({
@@ -80,17 +73,17 @@ router.get('/export/json', requireAuth, async (req: Request, res: Response) => {
         include: { category: true, user: { select: { id: true, name: true } } },
       }),
       prisma.monthlyRecord.findMany({
-        where: isAdmin ? {} : { OR: [{ userId: req.user!.id }, { userId: null }] },
+        where: { OR: [{ userId: req.user!.id }, { userId: null }] },
       }),
       prisma.savingsGoal.findMany({
-        where: isAdmin ? {} : { userId: req.user!.id },
+        where: { userId: req.user!.id },
       }),
       prisma.allocationBucket.findMany(),
     ]);
 
     const exportData = {
+      system: 'Finance.ME',
       exportedAt: new Date().toISOString(),
-      familyBaseCount: users.length,
       users,
       categories,
       transactions: transactions.map((t) => ({ ...t, amountDollars: centsToDollars(t.amountCents) })),
@@ -100,7 +93,7 @@ router.get('/export/json', requireAuth, async (req: Request, res: Response) => {
     };
 
     res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Content-Disposition', 'attachment; filename="family-financial-backup.json"');
+    res.setHeader('Content-Disposition', 'attachment; filename="financeme-backup.json"');
     res.status(200).json(exportData);
   } catch {
     res.status(500).json({ error: 'Failed to export JSON' });
