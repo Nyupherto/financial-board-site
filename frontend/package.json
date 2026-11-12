@@ -1,8 +1,9 @@
 {
-  "name": "financial-board-frontend",
+  "name": "finance-me-frontend",
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "description": "Finance.ME - Frontend Application",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

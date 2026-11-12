@@ -62,6 +62,7 @@ app.use('/api', exportRoutes);
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'online',
+    system: 'Finance.ME',
     timestamp: new Date().toISOString(),
   });
 });
@@ -74,6 +75,6 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Financial Board Backend API running on port ${PORT}`);
+  console.log(`🚀 Finance.ME Backend API running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
 });

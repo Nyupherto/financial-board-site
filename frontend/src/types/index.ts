@@ -1,15 +1,16 @@
+export type EntryType = 'INCOME' | 'EXPENSE' | 'SAVINGS';
+
 export interface UserProfile {
   id: string;
   name: string;
   email: string;
-  role: 'ADMIN' | 'MEMBER';
   avatarColor: string;
 }
 
 export interface Category {
   id: string;
   name: string;
-  type: 'INCOME' | 'EXPENSE';
+  type: EntryType;
   icon: string;
   color: string;
 }
@@ -22,7 +23,7 @@ export interface Transaction {
   description: string;
   amountCents: number;
   amountDollars: number;
-  type: 'INCOME' | 'EXPENSE';
+  type: EntryType;
   status: 'PAID' | 'PENDING';
   dueDate: string;
   paidAt?: string | null;
@@ -61,12 +62,14 @@ export interface DashboardSummary {
     totalExpensesDollars: number;
     totalPaidDollars: number;
     totalPendingDollars: number;
+    totalSavingsDollars?: number;
     netRemainingCashFlowDollars: number;
     netLiquidCashOnHandDollars: number;
     savingsRatePercent: number;
     expenseToIncomeRatioPercent: number;
     pendingLiabilitiesCount: number;
     paidLiabilitiesCount: number;
+    savingsTransactionsCount?: number;
     isDeficit: boolean;
     deficitAmountDollars: number;
   };
@@ -85,34 +88,50 @@ export interface CashFlowHistoryItem {
   periodLabel: string;
   income: number;
   expenses: number;
+  savings?: number;
   paid: number;
   pending: number;
   netCashFlow: number;
 }
 
-export interface SimulationResult {
-  summary: {
-    futureValueDollars: number;
-    totalPrincipalInvestedDollars: number;
-    totalInterestEarnedDollars: number;
-    nominalAnnualRatePercent: number;
-    effectiveAnnualRatePercent: number;
-    horizonMonths: number;
-    horizonYears: number;
-  };
-  milestones: {
-    targetDollars: number;
-    reachedAtMonth: number | null;
-    reachedAtYear: number | null;
-  }[];
+export interface SavingsGoalProjectionItem {
+  groupName: string;
+  color: string;
+  txCount: number;
+  activeMonthsCount: number;
+  totalInvestedDollars: number;
+  averageMonthlyContributionDollars: number;
+  targetAmountDollars: number;
+  progressPercent: number;
+  isReached: boolean;
+  monthsToGoalWithInterest: number | null;
+  monthsToGoalWithoutInterest: number | null;
+  interestSavedMonths: number;
+  projectedFinalBalanceDollars: number;
+  projectedTotalPrincipalDollars: number;
+  projectedTotalInterestDollars: number;
+  effectiveMonthlyRatePercent: number;
+  effectiveAnnualRatePercent: number;
   schedule: {
     month: number;
     year: number;
-    startingBalanceDollars: number;
-    contributionDollars: number;
-    interestEarnedDollars: number;
     endingBalanceDollars: number;
     cumulativePrincipalDollars: number;
     cumulativeInterestDollars: number;
   }[];
+}
+
+export interface SavingsOverviewResponse {
+  annualInterestRatePercent: number;
+  totalInvestedDollars: number;
+  averageMonthlyContributionDollars: number;
+  activeMonthsCount: number;
+  monthlyFlow: {
+    year: number;
+    month: number;
+    label: string;
+    amountCents: number;
+    amountDollars: number;
+  }[];
+  goals: SavingsGoalProjectionItem[];
 }

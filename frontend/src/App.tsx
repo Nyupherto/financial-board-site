@@ -4,7 +4,7 @@ import { SummaryCards } from './components/SummaryCards';
 import { ExpenseDonutChart } from './components/ExpenseDonutChart';
 import { CashFlowHistoryChart } from './components/CashFlowHistoryChart';
 import { SmartAllocations } from './components/SmartAllocations';
-import { CompoundInterestSimulator } from './components/CompoundInterestSimulator';
+import { SavingsGoalsPanel } from './components/SavingsGoalsPanel';
 import { TransactionLedger } from './components/TransactionLedger';
 import { CurrencySidebar } from './components/CurrencySidebar';
 import { AuthScreen } from './components/AuthScreen';
@@ -14,6 +14,7 @@ import {
   CashFlowHistoryItem,
   Transaction,
   Category,
+  SavingsOverviewResponse,
 } from './types';
 import { api, getAuthToken } from './services/api';
 import { CurrencyMode, ExchangeRates, DEFAULT_RATES } from './utils/currency';
@@ -46,6 +47,13 @@ export const App: React.FC = () => {
     return DEFAULT_RATES;
   });
 
+  // Internal Compound Interest Rate for Savings / Metas (% per annum)
+  const [annualInterestRate, setAnnualInterestRate] = useState<number>(() => {
+    const saved = localStorage.getItem('fb_internal_interest_rate');
+    const parsed = saved !== null ? parseFloat(saved) : 10;
+    return Number.isFinite(parsed) && parsed >= 0 ? Math.min(100, parsed) : 10;
+  });
+
   // Date state
   const [year, setYear] = useState<number>(2026);
   const [month, setMonth] = useState<number>(11);
@@ -54,7 +62,7 @@ export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
 
-  // Family users state
+  // Users state
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [activeUserId, setActiveUserId] = useState<string>('all');
 
@@ -63,6 +71,7 @@ export const App: React.FC = () => {
   const [history, setHistory] = useState<CashFlowHistoryItem[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [savingsOverview, setSavingsOverview] = useState<SavingsOverviewResponse | null>(null);
 
   // Theme Sync
   useEffect(() => {
@@ -81,6 +90,11 @@ export const App: React.FC = () => {
   const handleChangeRates = (nextRates: ExchangeRates) => {
     setRates(nextRates);
     localStorage.setItem('fb_exchange_rates', JSON.stringify(nextRates));
+  };
+
+  const handleChangeInterestRate = (nextRate: number) => {
+    setAnnualInterestRate(nextRate);
+    localStorage.setItem('fb_internal_interest_rate', String(nextRate));
   };
 
   // Check initial authentication
@@ -111,12 +125,18 @@ export const App: React.FC = () => {
   const fetchData = async () => {
     if (!currentUser) return;
     try {
-      const [sumData, histData, txData, catData, userList] = await Promise.all([
+      const [sumData, histData, txData, catData, userList, savOverview] = await Promise.all([
         api.getSummary(year, month, activeUserId),
         api.getHistory(activeUserId, year, month),
         api.getTransactions(year, month, activeUserId),
         api.getCategories(),
         api.getUsers(),
+        api.getSavingsOverview({
+          annualInterestRate,
+          year,
+          month,
+          userId: activeUserId,
+        }),
       ]);
 
       setSummary(sumData);
@@ -124,6 +144,7 @@ export const App: React.FC = () => {
       setTransactions(txData);
       setCategories(catData);
       setUsers(userList);
+      setSavingsOverview(savOverview);
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
     }
@@ -133,7 +154,7 @@ export const App: React.FC = () => {
     if (currentUser) {
       fetchData();
     }
-  }, [currentUser, year, month, activeUserId]);
+  }, [currentUser, year, month, activeUserId, annualInterestRate]);
 
   const handleSelectUser = (newUserId: string) => {
     setActiveUserId(newUserId);
@@ -144,6 +165,7 @@ export const App: React.FC = () => {
     setCurrentUser(null);
     setSummary(null);
     setTransactions([]);
+    setSavingsOverview(null);
   };
 
   const handleAuthSuccess = async (user: UserProfile) => {
@@ -157,7 +179,7 @@ export const App: React.FC = () => {
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="flex items-center gap-3 text-emerald-400 font-semibold text-sm">
           <div className="w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
-          Conectando ao banco de dados...
+          Conectando ao Finance.ME...
         </div>
       </div>
     );
@@ -170,7 +192,7 @@ export const App: React.FC = () => {
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} transition-colors`}>
-      {/* Top Navigation Bar (Currency toggle removed from top as requested) */}
+      {/* Top Navigation Bar */}
       <Header
         users={users}
         activeUserId={activeUserId}
@@ -190,7 +212,7 @@ export const App: React.FC = () => {
         onLogout={handleLogout}
       />
 
-      {/* Main Content + Right Currency Panel */}
+      {/* Main Content + Right Currency & Interest Panel */}
       <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6">
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
           {/* Left/Center Main Dashboard Area (9 cols) */}
@@ -205,16 +227,25 @@ export const App: React.FC = () => {
               />
             )}
 
-            {/* Accounts Ledger & Smart Group Manager */}
+            {/* Accounts Ledger & Smart Group Manager (+ Acréscimo, - Decréscimo, 🎯 Meta / Savings) */}
             <TransactionLedger
               transactions={transactions}
               categories={categories}
-              users={users}
               onRefresh={fetchData}
               year={year}
               month={month}
               currency={currency}
               rates={rates}
+            />
+
+            {/* Individual Savings Goals (Metas) & Compound Interest Flow */}
+            <SavingsGoalsPanel
+              savingsOverview={savingsOverview}
+              currency={currency}
+              rates={rates}
+              annualInterestRate={annualInterestRate}
+              onChangeInterestRate={handleChangeInterestRate}
+              onRefresh={fetchData}
             />
 
             {/* Visual Charts: Donut Breakdown + 12-Month History */}
@@ -247,21 +278,17 @@ export const App: React.FC = () => {
                 rates={rates}
               />
             )}
-
-            {/* Dedicated Savings & Offline Compound Interest Engine */}
-            <CompoundInterestSimulator
-              currency={currency}
-              rates={rates}
-            />
           </div>
 
-          {/* Right Area: Currency Switcher (BRL / USD / EUR) & Manual Exchange Rate Converter (3 cols) */}
+          {/* Right Area: Currency Switcher (BRL / USD / EUR), Exchange Rates & Internal Interest Rate (3 cols) */}
           <aside className="xl:col-span-3 xl:sticky xl:top-20">
             <CurrencySidebar
               currency={currency}
               onSelectCurrency={handleSelectCurrency}
               rates={rates}
               onChangeRates={handleChangeRates}
+              annualInterestRate={annualInterestRate}
+              onChangeInterestRate={handleChangeInterestRate}
             />
           </aside>
         </div>
@@ -269,7 +296,7 @@ export const App: React.FC = () => {
 
       {/* Footer */}
       <footer className="border-t border-slate-800/80 mt-12 py-6 px-4 text-center text-xs text-slate-500">
-        <p>Family Financial Management System • Zero-Float Integer Cents SQLite • 100% Offline Financial Math</p>
+        <p>Finance.ME • Zero-Float Integer Cents SQLite • 100% Offline Financial Math</p>
       </footer>
     </div>
   );

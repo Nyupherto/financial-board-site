@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   Users,
-  ShieldCheck,
   User,
   Download,
   Calendar,
@@ -63,12 +62,12 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-100 text-lg tracking-tight">FamilyFinance</span>
+                <span className="font-bold text-slate-100 text-lg tracking-tight">Finance.ME</span>
                 <span className="text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   SQLite Ativo
                 </span>
               </div>
-              <p className="text-xs text-slate-400">Banco de Dados em Tempo Real</p>
+              <p className="text-xs text-slate-400">Gestão Financeira & Metas</p>
             </div>
           </div>
 
@@ -107,9 +106,9 @@ export const Header: React.FC<HeaderProps> = ({
           </select>
         </div>
 
-        {/* Right Actions: Profile Switcher, Export, Theme, Logout */}
+        {/* Right Actions: Profile Filter, Export, Theme, Logout */}
         <div className="flex items-center flex-wrap gap-2.5 w-full md:w-auto justify-end">
-          {/* Multi-User Profile Dropdown */}
+          {/* Profile View Filter */}
           <div className="relative flex items-center bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5">
             <Users className="w-4 h-4 text-slate-400 mr-2" />
             <select
@@ -118,11 +117,11 @@ export const Header: React.FC<HeaderProps> = ({
               className="bg-transparent text-sm font-semibold text-slate-100 focus:outline-none cursor-pointer pr-6"
             >
               <option value="all" className="bg-slate-900 text-emerald-400">
-                👨‍👩‍👧‍👦 Visão da Família (Todos)
+                Visão Consolidada (Todos)
               </option>
               {users.map((u) => (
                 <option key={u.id} value={u.id} className="bg-slate-900 text-slate-100">
-                  {u.role === 'ADMIN' ? '👑' : '👤'} {u.name}
+                  👤 {u.name}
                 </option>
               ))}
             </select>
@@ -137,15 +136,9 @@ export const Header: React.FC<HeaderProps> = ({
                 style={{ backgroundColor: currentUser.avatarColor }}
               />
               <span className="text-slate-300 font-medium">{currentUser.name}</span>
-              {currentUser.role === 'ADMIN' ? (
-                <span className="flex items-center text-[10px] text-amber-400 font-bold ml-1">
-                  <ShieldCheck className="w-3 h-3 mr-0.5" /> Admin
-                </span>
-              ) : (
-                <span className="flex items-center text-[10px] text-blue-400 font-medium ml-1">
-                  <User className="w-3 h-3 mr-0.5" /> Membro
-                </span>
-              )}
+              <span className="flex items-center text-[10px] text-emerald-400 font-medium ml-1">
+                <User className="w-3 h-3 mr-0.5" /> Conta Ativa
+              </span>
             </div>
           )}
 

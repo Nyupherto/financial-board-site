@@ -1,8 +1,8 @@
 {
-  "name": "financial-board-backend",
+  "name": "finance-me-backend",
   "version": "1.0.0",
   "type": "module",
-  "description": "Personal & Family Financial Management Dashboard - Backend API & Financial Math Core",
+  "description": "Finance.ME - Backend API & Financial Math Core",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",

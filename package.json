@@ -1,8 +1,8 @@
 {
-  "name": "family-financial-board",
+  "name": "finance-me",
   "version": "1.0.0",
   "private": true,
-  "description": "Personal & Family Financial Management Dashboard - Full Stack Application",
+  "description": "Finance.ME - Personal Financial & Goals Dashboard",
   "scripts": {
     "start": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan,emerald\" \"npm --prefix backend start\" \"npm --prefix frontend run dev\"",
     "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan,emerald\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",

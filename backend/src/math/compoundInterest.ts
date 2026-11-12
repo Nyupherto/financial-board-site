@@ -1,8 +1,9 @@
 /**
- * 100% Offline Deterministic Compound Interest & Savings Engine
+ * 100% Offline Deterministic Compound Interest & Savings Goal Engine
  *
  * Implements standard financial engineering formulas for wealth projection,
- * fixed-income growth simulation, and month-by-month amortization schedules.
+ * fixed-income growth simulation, month-by-month amortization schedules,
+ * and Savings Goal ETA calculation based on historical contribution averages.
  * All computations use integer cents to guarantee deterministic outputs.
  */
 
@@ -12,7 +13,6 @@ import {
   centsToDollars,
   multiplyCentsByRate,
   addCents,
-  subtractCents,
 } from './currency.js';
 
 export interface CompoundInterestInput {
@@ -53,6 +53,26 @@ export interface CompoundInterestResult {
   milestones: MilestoneTarget[];
 }
 
+export interface SavingsGoalEtaInput {
+  currentSavedCents: Cents;
+  averageMonthlyContributionCents: Cents;
+  targetAmountCents: Cents;
+  annualInterestRatePercent: number;
+}
+
+export interface SavingsGoalEtaResult {
+  isReached: boolean;
+  monthsToGoalWithInterest: number | null;
+  monthsToGoalWithoutInterest: number | null;
+  interestSavedMonths: number;
+  projectedFinalBalanceCents: Cents;
+  projectedTotalPrincipalCents: Cents;
+  projectedTotalInterestCents: Cents;
+  effectiveMonthlyRatePercent: number;
+  effectiveAnnualRatePercent: number;
+  schedule: MonthlyScheduleEntry[];
+}
+
 /**
  * Calculates discrete month-by-month compound growth.
  * Uses exact integer cent rounding per period to replicate real-world bank ledger accounting.
@@ -79,14 +99,13 @@ export function calculateCompoundInterest(
   // Monthly nominal rate: i = (r / 100) / 12
   const monthlyRate = annualInterestRatePercent / 100 / (compoundingFrequencyPerYear || 12);
   const effectiveAnnualRatePercent =
-    ((Math.pow(1 + monthlyRate, compoundingFrequencyPerYear) - 1) * 100);
+    (Math.pow(1 + monthlyRate, compoundingFrequencyPerYear) - 1) * 100;
 
   const schedule: MonthlyScheduleEntry[] = [];
   let currentBalance = initialPrincipalCents;
   let cumulativePrincipal = initialPrincipalCents;
   let cumulativeInterest = 0;
 
-  // Track standard financial milestone thresholds ($10k, $25k, $50k, $100k, $250k, $500k, $1M)
   const defaultMilestones: Cents[] = [
     dollarsToCents(10_000),
     dollarsToCents(25_000),
@@ -111,12 +130,10 @@ export function calculateCompoundInterest(
     let endBalance = startBalance;
 
     if (contributionTiming === 'BEGINNING_OF_PERIOD') {
-      // Annuity Due: contribution earns interest in the current month
       const balanceBeforeInterest = addCents(startBalance, contribution);
       interestEarned = multiplyCentsByRate(balanceBeforeInterest, monthlyRate);
       endBalance = addCents(balanceBeforeInterest, interestEarned);
     } else {
-      // Ordinary Annuity (End of Period): interest earned on starting balance, contribution added at month-end
       interestEarned = multiplyCentsByRate(startBalance, monthlyRate);
       endBalance = addCents(addCents(startBalance, interestEarned), contribution);
     }
@@ -125,7 +142,6 @@ export function calculateCompoundInterest(
     cumulativeInterest = addCents(cumulativeInterest, interestEarned);
     currentBalance = endBalance;
 
-    // Check milestones
     for (const ms of milestones) {
       if (ms.reachedAtMonth === null && currentBalance >= ms.targetCents) {
         ms.reachedAtMonth = m;
@@ -150,7 +166,7 @@ export function calculateCompoundInterest(
     totalPrincipalInvestedCents: cumulativePrincipal,
     totalInterestEarnedCents: cumulativeInterest,
     nominalAnnualRatePercent: annualInterestRatePercent,
-    effectiveMonthlyRatePercent: monthlyRate * 100,
+    effectiveMonthlyRatePercent: Number((monthlyRate * 100).toFixed(4)),
     effectiveAnnualRatePercent: Number(effectiveAnnualRatePercent.toFixed(4)),
     horizonMonths,
     schedule,
@@ -159,9 +175,153 @@ export function calculateCompoundInterest(
 }
 
 /**
+ * Calculates how many months it takes to reach an individual Savings Goal (Meta)
+ * given the current accumulated balance, the historical average monthly contribution,
+ * and the internal annual interest rate.
+ */
+export function calculateSavingsGoalEta(
+  input: SavingsGoalEtaInput
+): SavingsGoalEtaResult {
+  const {
+    currentSavedCents,
+    averageMonthlyContributionCents,
+    targetAmountCents,
+    annualInterestRatePercent,
+  } = input;
+
+  const safeCurrent = Math.max(0, Math.round(currentSavedCents));
+  const safeMonthly = Math.max(0, Math.round(averageMonthlyContributionCents));
+  const safeTarget = Math.max(0, Math.round(targetAmountCents));
+  const safeAnnualRate = Math.max(0, Math.min(100, Number(annualInterestRatePercent) || 0));
+
+  const monthlyRate = safeAnnualRate / 100 / 12;
+  const effectiveAnnualRatePercent = Number(
+    ((Math.pow(1 + monthlyRate, 12) - 1) * 100).toFixed(4)
+  );
+  const effectiveMonthlyRatePercent = Number((monthlyRate * 100).toFixed(4));
+
+  // If target is already reached
+  if (safeTarget > 0 && safeCurrent >= safeTarget) {
+    const previewSim = calculateCompoundInterest({
+      initialPrincipalCents: safeCurrent,
+      monthlyContributionCents: safeMonthly,
+      annualInterestRatePercent: safeAnnualRate,
+      horizonMonths: 12,
+    });
+
+    return {
+      isReached: true,
+      monthsToGoalWithInterest: 0,
+      monthsToGoalWithoutInterest: 0,
+      interestSavedMonths: 0,
+      projectedFinalBalanceCents: safeCurrent,
+      projectedTotalPrincipalCents: safeCurrent,
+      projectedTotalInterestCents: 0,
+      effectiveMonthlyRatePercent,
+      effectiveAnnualRatePercent,
+      schedule: previewSim.schedule,
+    };
+  }
+
+  // If no target is set yet, return a 12-month compound projection of current flow
+  if (safeTarget <= 0) {
+    const previewSim = calculateCompoundInterest({
+      initialPrincipalCents: safeCurrent,
+      monthlyContributionCents: safeMonthly,
+      annualInterestRatePercent: safeAnnualRate,
+      horizonMonths: 12,
+    });
+
+    return {
+      isReached: false,
+      monthsToGoalWithInterest: null,
+      monthsToGoalWithoutInterest: null,
+      interestSavedMonths: 0,
+      projectedFinalBalanceCents: previewSim.futureValueCents,
+      projectedTotalPrincipalCents: previewSim.totalPrincipalInvestedCents,
+      projectedTotalInterestCents: previewSim.totalInterestEarnedCents,
+      effectiveMonthlyRatePercent,
+      effectiveAnnualRatePercent,
+      schedule: previewSim.schedule,
+    };
+  }
+
+  const remainingCents = safeTarget - safeCurrent;
+  const monthsWithoutInterest =
+    safeMonthly > 0 ? Math.ceil(remainingCents / safeMonthly) : null;
+
+  // Check if neither contributions nor interest can grow the balance
+  const initialMonthlyInterest = multiplyCentsByRate(safeCurrent, monthlyRate);
+  if (safeMonthly === 0 && initialMonthlyInterest === 0) {
+    return {
+      isReached: false,
+      monthsToGoalWithInterest: null,
+      monthsToGoalWithoutInterest: null,
+      interestSavedMonths: 0,
+      projectedFinalBalanceCents: safeCurrent,
+      projectedTotalPrincipalCents: safeCurrent,
+      projectedTotalInterestCents: 0,
+      effectiveMonthlyRatePercent,
+      effectiveAnnualRatePercent,
+      schedule: [],
+    };
+  }
+
+  // Step month-by-month up to 600 months (50 years) using exact compound interest ledger
+  const MAX_HORIZON = 600;
+  const schedule: MonthlyScheduleEntry[] = [];
+  let balance = safeCurrent;
+  let cumulativePrincipal = safeCurrent;
+  let cumulativeInterest = 0;
+  let reachedMonth: number | null = null;
+
+  for (let m = 1; m <= MAX_HORIZON; m++) {
+    const startBalance = balance;
+    const interestEarned = multiplyCentsByRate(startBalance, monthlyRate);
+    const endBalance = addCents(addCents(startBalance, interestEarned), safeMonthly);
+
+    cumulativePrincipal = addCents(cumulativePrincipal, safeMonthly);
+    cumulativeInterest = addCents(cumulativeInterest, interestEarned);
+    balance = endBalance;
+
+    schedule.push({
+      month: m,
+      year: Math.floor((m - 1) / 12) + 1,
+      startingBalanceCents: startBalance,
+      contributionCents: safeMonthly,
+      interestEarnedCents: interestEarned,
+      endingBalanceCents: endBalance,
+      cumulativePrincipalCents: cumulativePrincipal,
+      cumulativeInterestCents: cumulativeInterest,
+    });
+
+    if (balance >= safeTarget) {
+      reachedMonth = m;
+      break;
+    }
+  }
+
+  const interestSavedMonths =
+    reachedMonth !== null && monthsWithoutInterest !== null
+      ? Math.max(0, monthsWithoutInterest - reachedMonth)
+      : 0;
+
+  return {
+    isReached: false,
+    monthsToGoalWithInterest: reachedMonth,
+    monthsToGoalWithoutInterest: monthsWithoutInterest,
+    interestSavedMonths,
+    projectedFinalBalanceCents: balance,
+    projectedTotalPrincipalCents: cumulativePrincipal,
+    projectedTotalInterestCents: cumulativeInterest,
+    effectiveMonthlyRatePercent,
+    effectiveAnnualRatePercent,
+    schedule: schedule.slice(0, Math.min(schedule.length, Math.max(reachedMonth || 24, 12))),
+  };
+}
+
+/**
  * Closed-form analytical formula for compound interest future value.
- * Used for cross-validation against discrete ledger simulation:
- * FV = P * (1 + i)^n + PMT * [((1 + i)^n - 1) / i]
  */
 export function calculateAnalyticalFutureValue(
   initialPrincipalCents: Cents,
